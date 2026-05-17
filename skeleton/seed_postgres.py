@@ -10,6 +10,8 @@ Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 """
 
 import json
+import hashlib
+import binascii
 import os
 import sys
 
@@ -84,11 +86,55 @@ def seed_seat_layouts(cur):
     # TODO: Design your table schema, then implement the INSERT logic here.
     pass
 
-
 def seed_users(cur):
     data = load("registered_users.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    users_rows = []
+    credentials_rows = []
+    
+    for u in data:
+        # 擷取 email 前半段作為 username
+        username = u["email"].split("@")[0]
+        
+        users_rows.append((
+            u["user_id"],
+            username,
+            u["email"],
+            u["full_name"],
+            u["date_of_birth"],
+            u["phone"],
+            u["secret_question"],
+            u["registered_at"],
+            u["is_active"]
+        ))
+        
+        # 模擬加鹽與雜湊
+        salt = binascii.hexlify(os.urandom(16)).decode('utf-8')
+        pwd_hash = hashlib.sha256((u["password"] + salt).encode('utf-8')).hexdigest()
+        ans_hash = hashlib.sha256((u["secret_answer"] + salt).encode('utf-8')).hexdigest()
+        
+        credentials_rows.append((
+            u["user_id"],
+            pwd_hash,
+            salt,
+            ans_hash
+        ))
+
+    n_users = insert_many(
+        cur, 
+        "users", 
+        ["user_id", "username", "email", "full_name", "date_of_birth", "phone", "secret_question", "registered_at", "is_active"], 
+        users_rows
+    )
+    print(f"  users: {n_users} rows")
+    
+    n_creds = insert_many(
+        cur, 
+        "user_credentials", 
+        ["user_id", "password_hash", "password_salt", "secret_answer_hash"], 
+        credentials_rows
+    )
+    print(f"  user_credentials: {n_creds} rows")
 
 
 def seed_national_rail_bookings(cur):
