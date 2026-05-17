@@ -58,15 +58,84 @@ def insert_many(cur, table, columns, rows):
 
 def seed_metro_stations(cur):
     data = load("metro_stations.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    # Each item in `data` is a dict — inspect the JSON to see available fields.
-    pass
+    
+    stations_rows = []
+    lines_rows = []
+    
+    for s in data:
+        # 1. 準備主表 (metro_stations) 的資料
+        stations_rows.append((
+            s["station_id"],
+            s["name"],
+            s["is_interchange_metro"],
+            s["is_interchange_national_rail"],
+            s.get("interchange_national_rail_station_id") # 使用 get 避免 null 報錯
+        ))
+        
+        # 2. 準備子表 (metro_station_lines) 的資料：攤平 lines 陣列
+        for line in s.get("lines", []):
+            lines_rows.append((
+                s["station_id"],
+                line
+            ))
+
+    # 執行主表批量寫入
+    n_stations = insert_many(
+        cur, 
+        "metro_stations", 
+        ["station_id", "name", "is_interchange_metro", "is_interchange_national_rail", "interchange_national_rail_station_id"], 
+        stations_rows
+    )
+    print(f"  metro_stations: {n_stations} rows")
+    
+    # 執行子表批量寫入
+    n_lines = insert_many(
+        cur,
+        "metro_station_lines",
+        ["station_id", "line"],
+        lines_rows
+    )
+    print(f"  metro_station_lines: {n_lines} rows")
 
 
 def seed_national_rail_stations(cur):
     data = load("national_rail_stations.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    stations_rows = []
+    lines_rows = []
+    
+    for s in data:
+        # 1. 準備主表 (national_rail_stations) 的資料
+        stations_rows.append((
+            s["station_id"],
+            s["name"],
+            s["is_interchange_national_rail"],
+            s["is_interchange_metro"],
+            s.get("interchange_metro_station_id")
+        ))
+        
+        # 2. 準備子表 (national_rail_station_lines) 的資料
+        for line in s.get("lines", []):
+            lines_rows.append((
+                s["station_id"],
+                line
+            ))
+
+    n_stations = insert_many(
+        cur, 
+        "national_rail_stations", 
+        ["station_id", "name", "is_interchange_national_rail", "is_interchange_metro", "interchange_metro_station_id"], 
+        stations_rows
+    )
+    print(f"  national_rail_stations: {n_stations} rows")
+    
+    n_lines = insert_many(
+        cur,
+        "national_rail_station_lines",
+        ["station_id", "line"],
+        lines_rows
+    )
+    print(f"  national_rail_station_lines: {n_lines} rows")
 
 
 def seed_metro_schedules(cur):
