@@ -11,6 +11,7 @@ Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 
 import json
 import hashlib
+from argon2 import PasswordHasher
 import binascii
 import os
 import sys
@@ -343,17 +344,22 @@ def seed_refund_policies(cur):
     
     
 
+from argon2 import PasswordHasher  # 記得在檔案最上方加上這行引入
+
 def seed_users(cur):
     data = load("registered_users.json")
     
     users_rows = []
     credentials_rows = []
     
+    # 初始化 Argon2id 密碼雜湊器
+    ph = PasswordHasher()
+    
     for u in data:
         # 擷取 email 前半段作為 username
         username = u["email"].split("@")[0]
         
-        # 1. 準備 users 表資料
+        # 1. 準備 users 表資料 (主表，完全不含密碼)
         users_rows.append((
             u["user_id"],
             username,
@@ -366,9 +372,10 @@ def seed_users(cur):
             u["is_active"]
         ))
         
-        # 2. 準備 user_credentials 表資料 (不帶 salt 欄位)
-        pwd_hash = hashlib.sha256(u["password"].encode('utf-8')).hexdigest()
-        ans_hash = hashlib.sha256(u["secret_answer"].encode('utf-8')).hexdigest()
+        # 2. 準備 user_credentials 表資料 (憑證表)
+        # 🔒 使用 Argon2id 自動加鹽並加密
+        pwd_hash = ph.hash(u["password"])
+        ans_hash = ph.hash(u["secret_answer"])
         
         credentials_rows.append((
             u["user_id"],
@@ -385,14 +392,14 @@ def seed_users(cur):
     )
     print(f"  users: {n_users} rows")
     
-    # 執行寫入憑證表（這裡絕對不能出現 "password_salt"）
+    # 執行寫入憑證表 (不需要 salt 欄位，Argon2id 已經把它包在 hash 裡了)
     n_creds = insert_many(
         cur, 
         "user_credentials", 
         ["user_id", "password_hash", "secret_answer_hash"], 
         credentials_rows
     )
-    print(f"  user_credentials: {n_creds} rows")
+    print(f"  user_credentials (Argon2id secured): {n_creds} rows")
 
 def seed_national_rail_bookings(cur):
     data = load("bookings.json")
