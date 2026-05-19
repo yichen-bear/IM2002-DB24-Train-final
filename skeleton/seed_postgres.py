@@ -10,9 +10,7 @@ Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 """
 
 import json
-import hashlib
 from argon2 import PasswordHasher
-import binascii
 import os
 import sys
 
@@ -344,7 +342,6 @@ def seed_refund_policies(cur):
     
     
 
-from argon2 import PasswordHasher  # 記得在檔案最上方加上這行引入
 
 def seed_users(cur):
     data = load("registered_users.json")
