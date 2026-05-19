@@ -21,6 +21,8 @@ are already implemented — do not modify them.
 """
 
 from __future__ import annotations
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 import json
 import random
@@ -563,140 +565,122 @@ def register_user(
     secret_answer: str,
 ) -> tuple[bool, str]:
     """
-    Register a new user into both 'users' and 'user_credentials' tables.
-    Returns (True, user_id) on success or (False, error_message) on failure.
+    註冊新使用者，並使用 Argon2id 安全雜湊密碼與安全問題答案。
     """
-    # 1. 隨機生成 4 位數後綴，組合出 user_id (例如: RU-4829) 與 username
-    suffix = "".join(random.choices(string.digits, k=4))
-    user_id = f"RU-{suffix}"
-    username = email.split("@")[0] + suffix
+    ph = PasswordHasher()
     
-    # 將出生年轉為資料庫支援的 DATE 格式 (預設該年 1 月 1 日)
-    dob_str = f"{year_of_birth}-01-01" 
+    # 1. 產生安全的 Argon2id 雜湊值（自動加鹽）
+    hashed_password = ph.hash(password)
+    hashed_answer = ph.hash(secret_answer)
+    
+    # 根據 email 自動切出 username
+    username = email.split("@")[0]
+    user_id = f"UR-{ ''.join(random.choices(string.digits, k=5)) }"
     full_name = f"{first_name} {surname}"
-
-    # 2. 開始手動交易控制（因為要同時寫入兩張表，必須同步成功或同步失敗）
-    conn = psycopg2.connect(PG_DSN)
-    conn.autocommit = False
+    # 格式化生日（假設資料庫欄位需要 date 格式，用當年 1 月 1 日暫代，或依你們 schema 為準）
+    dob = f"{year_of_birth}-01-01" 
     
+    sql_user = """
+        INSERT INTO users (user_id, username, email, full_name, date_of_birth, secret_question, registered_at, is_active)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), TRUE);
+    """
+    sql_cred = """
+        INSERT INTO user_credentials (user_id, password_hash, secret_answer_hash)
+        VALUES (%s, %s, %s);
+    """
+    
+    # 寫入資料庫（注意：寫入多張表時建議用同一個連線控制 Transaction）
+    conn = _connect()
     try:
         with conn.cursor() as cur:
-            # 檢查 Email 是否已經被註冊過（維持資料唯一性限制）
-            cur.execute("SELECT 1 FROM users WHERE email = %s;", (email,))
-            if cur.fetchone():
-                conn.rollback()
-                return False, "Email already registered"
-
-            # 步驟 A：寫入基礎資料表 'users'
-            sql_user = """
-                INSERT INTO users (user_id, username, email, full_name, date_of_birth, secret_question, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE);
-            """
-            cur.execute(sql_user, (user_id, username, email, full_name, dob_str, secret_question))
-
-            # 步驟 B：寫入獨立憑證表 'user_credentials' (對接你的 password_hash 欄位)
-            sql_cred = """
-                INSERT INTO user_credentials (user_id, password_hash, secret_answer_hash)
-                VALUES (%s, %s, %s);
-            """
-            cur.execute(sql_cred, (user_id, password, secret_answer))
-
-            # 兩張表都寫入成功，才正式提交
-            conn.commit()
-            return True, user_id
-            
+            # 先寫入主表
+            cur.execute(sql_user, (user_id, username, email, full_name, dob, secret_question))
+            # 再寫入憑證表
+            cur.execute(sql_cred, (user_id, hashed_password, hashed_answer))
+        conn.commit()
+        return True, user_id
     except Exception as e:
-        # 只要其中一張表失敗（例如：Username 意外重複），立刻全部撤回
         conn.rollback()
-        return False, f"Registration failed: {str(e)}"
+        return False, str(e)
     finally:
         conn.close()
-
 def login_user(email: str, password: str) -> Optional[dict]:
     """
-    Verify credentials. Returns a user dict on success or None on failure.
-    Dict keys: user_id, email, full_name, first_name, surname, phone, date_of_birth, is_active.
+    驗證使用者登入憑證。成功則回傳使用者完整資料，失敗回傳 None。
     """
+    # 透過 JOIN 把 users 的基本資料和 user_credentials 的密碼雜湊一起撈出來
+    sql = """
+        SELECT u.user_id, u.email, u.full_name, u.date_of_birth, u.is_active, uc.password_hash
+        FROM users u
+        JOIN user_credentials uc ON u.user_id = uc.user_id
+        WHERE u.email = %s;
+    """
+    
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1. 使用 JOIN 串接兩張表，透過 email 撈出使用者資料與密碼
-            sql = """
-                SELECT u.user_id, u.email, u.full_name, u.phone, u.date_of_birth, u.is_active, 
-                       uc.password_hash
-                FROM users u
-                JOIN user_credentials uc ON u.user_id = uc.user_id
-                WHERE u.email = %s;
-            """
             cur.execute(sql, (email,))
-            row = cur.fetchone()
+            user_record = cur.fetchone()
             
-            # 2. 檢查使用者是否存在，以及密碼是否正確（比對對接資料庫的 password_hash）
-            if not row or row["password_hash"] != password:
+            if not user_record or not user_record["is_active"]:
                 return None
             
-            # 3. 解析名字 (first_name) 與姓氏 (surname)
-            # 假設 full_name 是 "First Last"，用空格切成兩半
-            full_name = row["full_name"] or ""
-            parts = full_name.split(" ", 1)
-            first_name = parts[0] if len(parts) > 0 else ""
-            surname = parts[1] if len(parts) > 1 else ""
-
-            # 4. 組裝成老師要求的欄位格式並回傳
-            return {
-                "user_id": row["user_id"],
-                "email": row["email"],
-                "full_name": full_name,
-                "first_name": first_name,
-                "surname": surname,
-                "phone": row["phone"],
-                "date_of_birth": str(row["date_of_birth"]) if row["date_of_birth"] else None,
-                "is_active": row["is_active"]
-            }
-
+            # 使用 Argon2id 進行密碼驗證
+            ph = PasswordHasher()
+            try:
+                ph.verify(user_record["password_hash"], password)
+                
+                # 驗證成功，移除敏感的密碼欄位後回傳
+                user_dict = dict(user_record)
+                user_dict.pop("password_hash", None)
+                return user_dict
+            except VerifyMismatchError:
+                return None # 密碼錯誤
 def get_user_secret_question(email: str) -> Optional[str]:
-    """Return the secret question for a registered email, or None if not found."""
+    """查詢使用者的安全問題。"""
+    sql = "SELECT secret_question FROM users WHERE email = %s;"
     with _connect() as conn:
         with conn.cursor() as cur:
-            # 直接從 users 表中透過 email 尋找安全提問
-            cur.execute("SELECT secret_question FROM users WHERE email = %s;", (email,))
-            res = cur.fetchone()
-            
-            # 如果有找到使用者，回傳該安全提問的字串；找不到則回傳 None
-            return res[0] if res else None
-def verify_secret_answer(email: str, answer: str) -> bool:
-    """Return True if the provided answer matches the stored secret answer (case-insensitive)."""
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            # 使用 JOIN 透過 email 串接 user_credentials 撈出答案
-            sql = """
-                SELECT uc.secret_answer_hash FROM user_credentials uc
-                JOIN users u ON u.user_id = uc.user_id
-                WHERE u.email = %s;
-            """
             cur.execute(sql, (email,))
-            res = cur.fetchone()
+            row = cur.fetchone()
+            return row[0] if row else None
+def verify_secret_answer(email: str, answer: str) -> bool:
+    """驗證安全問題答案是否正確（不區分大小寫）。"""
+    sql = """
+        SELECT uc.secret_answer_hash
+        FROM users u
+        JOIN user_credentials uc ON u.user_id = uc.user_id
+        WHERE u.email = %s;
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (email,))
+            row = cur.fetchone()
+            if not row:
+                return False
             
-            # 如果有找到紀錄且答案不為空，進行不區分大小寫與去前後空白的比對
-            if res and res[0]:
-                return res[0].lower().strip() == answer.lower().strip()
-            
-            return False
+            ph = PasswordHasher()
+            try:
+                # 由於答案通常會被轉換為小寫比對，建議輸入的答案可以做 .lower().strip() 處理
+                ph.verify(row[0], answer.lower().strip())
+                return True
+            except VerifyMismatchError:
+                return False
 
 
 def update_password(email: str, new_password: str) -> bool:
-    """Update the password for a user. Returns True if the row was updated."""
+    """更新使用者密碼。"""
+    ph = PasswordHasher()
+    new_hash = ph.hash(new_password)
+    
+    sql = """
+        UPDATE user_credentials
+        SET password_hash = %s
+        WHERE user_id = (SELECT user_id FROM users WHERE email = %s);
+    """
     with _connect() as conn:
         with conn.cursor() as cur:
-            # 透過子查詢，找出 email 對應的 user_id，並更新密碼
-            sql = """
-                UPDATE user_credentials 
-                SET password_hash = %s
-                WHERE user_id = (SELECT user_id FROM users WHERE email = %s);
-            """
-            cur.execute(sql, (new_password, email))
-            
-            # cur.rowcount 會回傳受影響的資料列數量
-            # 如果大於 0 代表更新成功 (回傳 True)，若 email 不存在則會大於 0 失敗 (回傳 False)
+            cur.execute(sql, (new_hash, email))
+            # cur.rowcount 會回傳受影響的行數，如果 > 0 代表更新成功
             return cur.rowcount > 0
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────
 
