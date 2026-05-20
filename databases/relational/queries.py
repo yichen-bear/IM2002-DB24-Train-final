@@ -389,16 +389,19 @@ def query_user_bookings(user_email: str) -> dict:
             metro_list = [dict(r) for r in cur.fetchall()]
             
             # 4. 防呆：把所有日期、時間欄位全部轉成字串，避免外層 JSON 解析失敗
+            from datetime import date, time  # 🟢 確保這行有加
             for item in nr_list + metro_list:
                 for k, v in item.items():
-                    if isinstance(v, (datetime, datetime.date, datetime.time)):
+                    # 🟢 確保括號裡面只有 datetime, date, time (沒有 .date)
+                    if isinstance(v, (datetime, date, time)):
                         item[k] = str(v)
                         
             return {
                 "national_rail": nr_list,
                 "metro": metro_list
             }
-
+            
+            
 def query_payment_info(booking_id: str) -> Optional[dict]:
     """Return payment record for a booking or metro trip."""
     with _connect() as conn:
