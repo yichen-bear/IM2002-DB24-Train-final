@@ -82,11 +82,8 @@ def query_national_rail_availability(
     """
     results = []
     
-    # 開啟資料庫連線
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            
-            # 1. 從資料庫撈出所有的火車班次
             sql = """
                 SELECT schedule_id, route_id, line, policy_id, service_type, direction,
                        departure_time, arrival_time, origin_station_id, destination_station_id,
@@ -97,22 +94,32 @@ def query_national_rail_availability(
             cur.execute(sql)
             schedules = cur.fetchall()
 
-            # 2. 用 Python 檢查每一班車的停靠站順序
             for sch in schedules:
-                stops_str = sch.get("stops_in_order") or ""
-                # 把資料庫儲存的 "NR01,NR02,NR03" 變成 Python 的列表 ['NR01', 'NR02', 'NR03']
-                stops = [s.strip() for s in stops_str.split(",") if s.strip()]
+                raw_stops = sch.get("stops_in_order") or ""
                 
-                # 檢查起點和終點是不是都在這班車的路線上
+                # 🛡️ 智慧相容解析邏輯：完美支援 JSON 陣列或傳統逗號分隔字串
+                if isinstance(raw_stops, list):
+                    stops = raw_stops
+                elif isinstance(raw_stops, str):
+                    raw_stops = raw_stops.strip()
+                    if raw_stops.startswith("["):
+                        import json
+                        stops = json.loads(raw_stops)
+                    else:
+                        stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
+                else:
+                    stops = []
+                
+                # 判斷起訖站是否都在這班車的停靠站清單內
                 if origin_id in stops and destination_id in stops:
                     orig_idx = stops.index(origin_id)
                     dest_idx = stops.index(destination_id)
                     
-                    # 確保起點的順序在終點前面（如果相反代表這班車是反方向開的）
+                    # 確保發車站的順序早於目的地站（方向正確）
                     if orig_idx < dest_idx:
                         sch_dict = dict(sch)
                         
-                        # 3. 如果使用者有給乘車日期，去 bookings 表計算當天這班車已經有多少張「確認」的訂單
+                        # 查詢特定日期的已訂位人數
                         occupied_seats = 0
                         if travel_date:
                             cur.execute(
@@ -124,14 +131,14 @@ def query_national_rail_availability(
                             )
                             occupied_seats = cur.fetchone()["count"]
                         
-                        # 把計算好的「已佔用座位數」和「搭乘站數」塞進回傳的資料裡
                         sch_dict["occupied_seats"] = occupied_seats
                         sch_dict["stops_travelled"] = dest_idx - orig_idx
                         results.append(sch_dict)
                         
-    # 最後依據火車的出發時間，由早到晚幫使用者排好序
-    results.sort(key=lambda x: x["departure_time"])
+    # 依發車時間排序
+    results.sort(key=lambda x: x["departure_time"] if x["departure_time"] else "")
     return results
+
 
 def query_national_rail_fare(
     schedule_id: str,
@@ -187,7 +194,6 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
     
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1. 撈出所有地鐵班次資料
             cur.execute(
                 """
                 SELECT metro_schedule_id, line, direction, origin_station_id, destination_station_id,
@@ -198,24 +204,34 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
             )
             schedules = cur.fetchall()
             
-            # 2. 檢查地鐵路線順序是否符合使用者的起訖站
             for sch in schedules:
-                stops_str = sch.get("stops_in_order") or ""
-                # 把地鐵站點字串 "MS01,MS02,MS03" 拆解成 Python 列表
-                stops = [s.strip() for s in stops_str.split(",") if s.strip()]
+                raw_stops = sch.get("stops_in_order") or ""
+                
+                # 🛡️ 增強版解析邏輯
+                if isinstance(raw_stops, list):
+                    stops = raw_stops
+                elif isinstance(raw_stops, str):
+                    raw_stops = raw_stops.strip()
+                    if raw_stops.startswith("["):
+                        import json
+                        stops = json.loads(raw_stops)
+                    else:
+                        stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
+                else:
+                    stops = []
                 
                 if origin_id in stops and destination_id in stops:
                     orig_idx = stops.index(origin_id)
                     dest_idx = stops.index(destination_id)
                     
-                    # 確保是同一個行車方向（起點在終點前）
                     if orig_idx < dest_idx:
                         sch_dict = dict(sch)
-                        # 計算這次地鐵航程一共坐了幾站
                         sch_dict["stops_travelled"] = dest_idx - orig_idx
                         results.append(sch_dict)
                         
     return results
+
+
 def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
     """
     Calculate the metro fare for a single-ticket journey.
