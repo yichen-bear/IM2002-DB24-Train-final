@@ -272,6 +272,19 @@ body, .gradio-container {
     background-color: #eef0f4 !important;
 }
 
+.gr-button {
+    font-weight: bold !important;
+    border-radius: 8px !important;
+    padding: 8px 16px;
+    font-size: 16px;
+}
+
+/* 針對特定變體（Variant）的按鈕微調顏色 */
+.gr-button-primary {
+    background-color: #4F46E5 !important; /* 改變主要按鈕（如 Login 提交）的顏色 */
+    color: white !important;
+}
+
 .block {
     background-color: #ffffff !important;
     border: 1px solid #d0d5dd !important;
@@ -296,6 +309,12 @@ input[type="text"], input[type="password"], textarea {
 hr {
     border-color: #d0d5dd !important;
 }
+
+/* ── Auth panels: limit width so fields don't stretch full page ── */
+#login_panel, #register_panel, #forgot_panel {
+    max-width: 480px !important;
+    margin: 0 auto !important;
+}
 """
 
 with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
@@ -318,18 +337,18 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
             logout_btn = gr.Button("Logout", size="sm", variant="stop", visible=False)
 
     # ── Login panel (hidden by default) ──────────────────────────────
-    with gr.Column(visible=False) as login_panel:
+    with gr.Column(visible=False, elem_id="login_panel") as login_panel:
         gr.Markdown("### Login")
         login_email_in    = gr.Textbox(label="Email", placeholder="you@example.com")
         login_password_in = gr.Textbox(label="Password", type="password")
         login_error_msg   = gr.Markdown("", visible=False)
         with gr.Row():
             login_submit_btn = gr.Button("Login", variant="primary")
-            forgot_link_btn  = gr.Button("Forgot password?", size="sm")
+            forgot_link_btn  = gr.Button("Forgot password?")
             login_cancel_btn = gr.Button("Cancel", size="sm")
 
     # ── Register panel (hidden by default) ───────────────────────────
-    with gr.Column(visible=False) as register_panel:
+    with gr.Column(visible=False, elem_id="register_panel") as register_panel:
         gr.Markdown("### Create an Account")
         with gr.Row():
             reg_first_name_in = gr.Textbox(label="First name")
@@ -345,7 +364,7 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
             reg_cancel_btn = gr.Button("Cancel", size="sm")
 
     # ── Forgot password panel (hidden by default) ─────────────────────
-    with gr.Column(visible=False) as forgot_panel:
+    with gr.Column(visible=False, elem_id="forgot_panel") as forgot_panel:
         gr.Markdown("### Reset Your Password")
         forgot_email_in          = gr.Textbox(label="Email address", placeholder="you@example.com")
         forgot_check_btn         = gr.Button("Find my question", variant="secondary")
