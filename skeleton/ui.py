@@ -240,6 +240,11 @@ def forgot_reset_password(email: str, answer: str, new_password: str):
 
 # ── Panel visibility toggles ──────────────────────────────────────────────────
 
+def toggle_debug(current: bool):
+    new_val = not current
+    label = "🔍 Debug panel: 開啟中" if new_val else "🔍 Debug panel: 已關閉"
+    return new_val, gr.update(value=label)
+
 def show_login_panel():
     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
@@ -312,6 +317,7 @@ hr {
     padding: 0 16px !important;
     box-sizing: border-box !important;
 }
+
 """
 
 with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
@@ -319,6 +325,7 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
     # ── Hidden state ──────────────────────────────────────────────────
     agent_history_state = gr.State([])
     current_user_state  = gr.State(None)   # None = guest, email str = logged in
+    debug_state         = gr.State(True)   # True = debug panel on
 
     # ── Header: title + auth buttons ─────────────────────────────────
     with gr.Row(equal_height=True):
@@ -389,7 +396,7 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
 
             with gr.Row():
                 clear_btn    = gr.Button("🗑️ Clear conversation", size="sm")
-                debug_toggle = gr.Checkbox(label="🔍 Show database debug panel", value=True)
+                debug_toggle = gr.Button("🔍 Debug panel: 開啟中", size="sm")
 
             # Debug panel — hidden until checkbox is ticked and a message is sent
             debug_panel = gr.Markdown(
@@ -429,19 +436,25 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
 
     send_btn.click(
         fn=chat,
-        inputs=[msg, chatbot, agent_history_state, debug_toggle, current_user_state],
+        inputs=[msg, chatbot, agent_history_state, debug_state, current_user_state],
         outputs=[chatbot, agent_history_state, debug_panel],
     ).then(fn=lambda: "", outputs=msg)
 
     msg.submit(
         fn=chat,
-        inputs=[msg, chatbot, agent_history_state, debug_toggle, current_user_state],
+        inputs=[msg, chatbot, agent_history_state, debug_state, current_user_state],
         outputs=[chatbot, agent_history_state, debug_panel],
     ).then(fn=lambda: "", outputs=msg)
 
     clear_btn.click(
         fn=clear_conversation,
         outputs=[chatbot, agent_history_state, debug_panel],
+    )
+
+    debug_toggle.click(
+        fn=toggle_debug,
+        inputs=[debug_state],
+        outputs=[debug_state, debug_toggle],
     )
 
     # Panel toggle buttons
