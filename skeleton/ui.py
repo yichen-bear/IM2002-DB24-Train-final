@@ -326,12 +326,12 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
 # 🚂 TransitFlow Intelligent Rail Assistant
 *Powered by PostgreSQL · pgvector · Neo4j · LLM*
         """)
-        with gr.Column(scale=0, min_width=240):
-            with gr.Row():
+        with gr.Column(scale=0, min_width=260):
+            with gr.Row(equal_height=True):
                 login_btn    = gr.Button("👤 Login",    size="sm", variant="secondary")
                 register_btn = gr.Button("📝 Register", size="sm", variant="secondary")
+                logout_btn   = gr.Button("Logout",      size="sm", variant="stop", visible=False)
             user_info_display = gr.Markdown("", visible=False)
-            logout_btn = gr.Button("Logout", size="sm", variant="stop", visible=False)
 
     # ── Login panel (hidden by default) ──────────────────────────────
     with gr.Column(visible=False, elem_id="login_panel") as login_panel:
