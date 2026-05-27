@@ -267,7 +267,38 @@ EXAMPLES = [
 
 # ── Build UI ───────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="TransitFlow") as demo:
+BLOCK_CSS = """
+body, .gradio-container {
+    background-color: #eef0f4 !important;
+}
+
+.block {
+    background-color: #ffffff !important;
+    border: 1px solid #d0d5dd !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    padding: 12px !important;
+}
+
+.chatbot {
+    background-color: #f8f9fb !important;
+    border: 1px solid #c5ccd8 !important;
+    border-radius: 10px !important;
+}
+
+input[type="text"], input[type="password"], textarea {
+    background-color: #f5f7fa !important;
+    border: 1px solid #b0b8c8 !important;
+    border-radius: 6px !important;
+    color: #1a202c !important;
+}
+
+hr {
+    border-color: #d0d5dd !important;
+}
+"""
+
+with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
 
     # ── Hidden state ──────────────────────────────────────────────────
     agent_history_state = gr.State([])
