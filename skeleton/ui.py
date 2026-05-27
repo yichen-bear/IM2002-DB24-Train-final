@@ -272,19 +272,6 @@ body, .gradio-container {
     background-color: #eef0f4 !important;
 }
 
-.gr-button {
-    font-weight: bold !important;
-    border-radius: 8px !important;
-    padding: 8px 16px;
-    font-size: 16px;
-}
-
-/* 針對特定變體（Variant）的按鈕微調顏色 */
-.gr-button-primary {
-    background-color: #4F46E5 !important; /* 改變主要按鈕（如 Login 提交）的顏色 */
-    color: white !important;
-}
-
 .block {
     background-color: #ffffff !important;
     border: 1px solid #d0d5dd !important;
@@ -315,6 +302,16 @@ hr {
     max-width: 480px !important;
     margin: 0 auto !important;
 }
+
+/* ── Auth panel buttons: uniform size and font ── */
+#login_panel button, #register_panel button, #forgot_panel button {
+    height: 40px !important;
+    min-width: 120px !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+    padding: 0 16px !important;
+    box-sizing: border-box !important;
+}
 """
 
 with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
@@ -344,7 +341,7 @@ with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
         login_error_msg   = gr.Markdown("", visible=False)
         with gr.Row():
             login_submit_btn = gr.Button("Login", variant="primary")
-            forgot_link_btn  = gr.Button("Forgot password?")
+            forgot_link_btn  = gr.Button("Forgot password?", size="sm")
             login_cancel_btn = gr.Button("Cancel", size="sm")
 
     # ── Register panel (hidden by default) ───────────────────────────
