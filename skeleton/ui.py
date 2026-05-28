@@ -240,6 +240,11 @@ def forgot_reset_password(email: str, answer: str, new_password: str):
 
 # ── Panel visibility toggles ──────────────────────────────────────────────────
 
+def toggle_debug(current: bool):
+    new_val = not current
+    label = "🔍 Debug panel: 開啟中" if new_val else "🔍 Debug panel: 已關閉"
+    return new_val, gr.update(value=label)
+
 def show_login_panel():
     return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
 
@@ -267,11 +272,60 @@ EXAMPLES = [
 
 # ── Build UI ───────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="TransitFlow") as demo:
+BLOCK_CSS = """
+body, .gradio-container {
+    background-color: #eef0f4 !important;
+}
+
+.block {
+    background-color: #ffffff !important;
+    border: 1px solid #d0d5dd !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    padding: 12px !important;
+}
+
+.chatbot {
+    background-color: #f8f9fb !important;
+    border: 1px solid #c5ccd8 !important;
+    border-radius: 10px !important;
+}
+
+input[type="text"], input[type="password"], textarea {
+    background-color: #f5f7fa !important;
+    border: 1px solid #b0b8c8 !important;
+    border-radius: 6px !important;
+    color: #1a202c !important;
+}
+
+hr {
+    border-color: #d0d5dd !important;
+}
+
+/* ── Auth panels: limit width so fields don't stretch full page ── */
+#login_panel, #register_panel, #forgot_panel {
+    max-width: 480px !important;
+    margin: 0 auto !important;
+}
+
+/* ── Auth panel buttons: uniform size and font ── */
+#login_panel button, #register_panel button, #forgot_panel button {
+    height: 40px !important;
+    min-width: 120px !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+    padding: 0 16px !important;
+    box-sizing: border-box !important;
+}
+
+"""
+
+with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
 
     # ── Hidden state ──────────────────────────────────────────────────
     agent_history_state = gr.State([])
     current_user_state  = gr.State(None)   # None = guest, email str = logged in
+    debug_state         = gr.State(True)   # True = debug panel on
 
     # ── Header: title + auth buttons ─────────────────────────────────
     with gr.Row(equal_height=True):
@@ -279,15 +333,15 @@ with gr.Blocks(title="TransitFlow") as demo:
 # 🚂 TransitFlow Intelligent Rail Assistant
 *Powered by PostgreSQL · pgvector · Neo4j · LLM*
         """)
-        with gr.Column(scale=0, min_width=240):
-            with gr.Row():
+        with gr.Column(scale=0, min_width=260):
+            with gr.Row(equal_height=True):
                 login_btn    = gr.Button("👤 Login",    size="sm", variant="secondary")
                 register_btn = gr.Button("📝 Register", size="sm", variant="secondary")
+                logout_btn   = gr.Button("Logout",      size="sm", variant="stop", visible=False)
             user_info_display = gr.Markdown("", visible=False)
-            logout_btn = gr.Button("Logout", size="sm", variant="stop", visible=False)
 
     # ── Login panel (hidden by default) ──────────────────────────────
-    with gr.Column(visible=False) as login_panel:
+    with gr.Column(visible=False, elem_id="login_panel") as login_panel:
         gr.Markdown("### Login")
         login_email_in    = gr.Textbox(label="Email", placeholder="you@example.com")
         login_password_in = gr.Textbox(label="Password", type="password")
@@ -298,7 +352,7 @@ with gr.Blocks(title="TransitFlow") as demo:
             login_cancel_btn = gr.Button("Cancel", size="sm")
 
     # ── Register panel (hidden by default) ───────────────────────────
-    with gr.Column(visible=False) as register_panel:
+    with gr.Column(visible=False, elem_id="register_panel") as register_panel:
         gr.Markdown("### Create an Account")
         with gr.Row():
             reg_first_name_in = gr.Textbox(label="First name")
@@ -314,7 +368,7 @@ with gr.Blocks(title="TransitFlow") as demo:
             reg_cancel_btn = gr.Button("Cancel", size="sm")
 
     # ── Forgot password panel (hidden by default) ─────────────────────
-    with gr.Column(visible=False) as forgot_panel:
+    with gr.Column(visible=False, elem_id="forgot_panel") as forgot_panel:
         gr.Markdown("### Reset Your Password")
         forgot_email_in          = gr.Textbox(label="Email address", placeholder="you@example.com")
         forgot_check_btn         = gr.Button("Find my question", variant="secondary")
@@ -342,7 +396,7 @@ with gr.Blocks(title="TransitFlow") as demo:
 
             with gr.Row():
                 clear_btn    = gr.Button("🗑️ Clear conversation", size="sm")
-                debug_toggle = gr.Checkbox(label="🔍 Show database debug panel", value=True)
+                debug_toggle = gr.Button("🔍 Debug panel: 開啟中", size="sm")
 
             # Debug panel — hidden until checkbox is ticked and a message is sent
             debug_panel = gr.Markdown(
@@ -382,19 +436,25 @@ with gr.Blocks(title="TransitFlow") as demo:
 
     send_btn.click(
         fn=chat,
-        inputs=[msg, chatbot, agent_history_state, debug_toggle, current_user_state],
+        inputs=[msg, chatbot, agent_history_state, debug_state, current_user_state],
         outputs=[chatbot, agent_history_state, debug_panel],
     ).then(fn=lambda: "", outputs=msg)
 
     msg.submit(
         fn=chat,
-        inputs=[msg, chatbot, agent_history_state, debug_toggle, current_user_state],
+        inputs=[msg, chatbot, agent_history_state, debug_state, current_user_state],
         outputs=[chatbot, agent_history_state, debug_panel],
     ).then(fn=lambda: "", outputs=msg)
 
     clear_btn.click(
         fn=clear_conversation,
         outputs=[chatbot, agent_history_state, debug_panel],
+    )
+
+    debug_toggle.click(
+        fn=toggle_debug,
+        inputs=[debug_state],
+        outputs=[debug_state, debug_toggle],
     )
 
     # Panel toggle buttons

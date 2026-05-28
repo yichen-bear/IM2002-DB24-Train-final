@@ -177,6 +177,8 @@ def query_national_rail_fare(
             if not row:
                 return None
             
+            stops_travelled = int(stops_travelled)
+            
             # 2. 根據艙等 (fare_class) 決定要使用的基本票價與每站費率
             if fare_class.lower() == "first":
                 base = float(row["base_fare_first_usd"] or 0)
@@ -250,6 +252,8 @@ def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
     """
     Calculate the metro fare for a single-ticket journey.
     """
+    stops_travelled = int(stops_travelled)
+
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # 1. 依據地鐵班次 ID 撈出對應的基本票價與每站費率
