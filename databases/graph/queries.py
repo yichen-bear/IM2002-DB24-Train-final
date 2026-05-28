@@ -207,13 +207,13 @@ def query_alternative_routes(
             record = result.single()
             
             if not record:
-                return {
+                return [{
                     "found": False,
                     "origin_id": origin_id,
                     "destination_id": destination_id,
                     "avoid_station_id": avoid_station_id,
                     "message": f"No alternative route found avoiding {avoid_station_id}."
-                }
+                }]
             
             path = record["path"]
             total_hops = record["total_hops"]
@@ -243,7 +243,7 @@ def query_alternative_routes(
                 "stations": stations,
                 "legs": legs
             }
-            
+
 
 # ── CROSS-NETWORK INTERCHANGE PATH ───────────────────────────────────────────
 
