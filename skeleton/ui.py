@@ -320,7 +320,7 @@ hr {
 
 """
 
-with gr.Blocks(title="TransitFlow", css=BLOCK_CSS) as demo:
+with gr.Blocks(title="TransitFlow") as demo:
 
     # ── Hidden state ──────────────────────────────────────────────────
     agent_history_state = gr.State([])
@@ -556,6 +556,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
+        css=BLOCK_CSS,
         share=False,
         theme=gr.themes.Soft(),
     )
