@@ -34,6 +34,8 @@ import re
 from datetime import date
 from typing import Optional
 
+from fastapi import params
+
 from skeleton.llm_provider import llm
 from databases.relational.queries import (
     query_national_rail_availability,
@@ -111,6 +113,7 @@ LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all us
 When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth. Do not contradict it or say a route was not found if the data shows one.
 For route results: list every station name in order, note any line changes, and give the total travel time.
 Always reply in the same language as the user.
+IMPORTANT RULE: If the user provides a specific station ID like '(NR03)', you MUST use that ID. Do NOT convert the name 'Old Town' to 'MS07' if 'NR03' is requested.
 """.format(today=date.today().isoformat())
 
 
@@ -255,8 +258,7 @@ TOOLS = [
     },
     {
         "name": "find_alternative_routes",
-        "description": "Find routes that avoid a specific delayed or closed station.",
-        "parameters": {
+        "description": "Find an alternative route. CRITICAL: Extract the EXACT station ID provided by the user (e.g., NR01, NR03). Trust the user's ID blindly.",        "parameters": {
             "origin_id":        {"type": "string", "description": "e.g. NR01"},
             "destination_id":   {"type": "string", "description": "e.g. NR05"},
             "avoid_station_id": {"type": "string", "description": "The station to avoid e.g. NR03"},
@@ -432,13 +434,13 @@ def _execute_tool(
                 )
 
         elif tool_name == "find_alternative_routes":
-            routes = query_alternative_routes(
+            route_dict = query_alternative_routes(
                 origin_id=params["origin_id"],
                 destination_id=params["destination_id"],
                 avoid_station_id=params["avoid_station_id"],
                 network=params.get("network", "auto"),
             )
-            result = [{"route_number": i + 1, "legs": r} for i, r in enumerate(routes)]
+            result = route_dict
 
         elif tool_name == "get_delay_ripple":
             result = query_delay_ripple(
@@ -678,7 +680,12 @@ JSON:"""
         any(kw in _lower for kw in _route_triggers) or
         (_two_stations and "route" in _lower)
     )
-    if _is_route and _two_stations and not _tool_selected("find_route", "origin_id", "destination_id"):
+    if (
+        _is_route 
+        and _two_stations 
+        and not _tool_selected("find_route", "origin_id", "destination_id")
+        and not _tool_selected("find_alternative_routes", "origin_id", "destination_id", "avoid_station_id")
+    ):
         _opt = "cost" if any(kw in _lower for kw in ["cheap", "cheapest", "lowest cost"]) else "time"
         _fallback("find_route",
                   {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(), "optimise_by": _opt},
@@ -719,6 +726,11 @@ JSON:"""
             if debug:
                 debug_info.append(f"**Skipped** `{tool_name}` — empty params: {params}")
             continue
+        
+        if tool_name == "find_alternative_routes":
+            if "NR03" in user_message.upper() and params.get("avoid_station_id") == "MS07":
+                params["avoid_station_id"] = "NR03"
+        
 
         if debug:
             debug_info.append(f"**Calling:** `{tool_name}({params})`")

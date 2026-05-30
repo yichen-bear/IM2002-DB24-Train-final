@@ -27,7 +27,7 @@ from argon2.exceptions import VerifyMismatchError
 import json
 import random
 import string
-from datetime import datetime, timezone
+from datetime import datetime, date, time, timezone
 from typing import Optional
 
 import psycopg2
@@ -72,14 +72,23 @@ def example_query() -> dict:
 # ── NATIONAL RAIL AVAILABILITY ────────────────────────────────────────────────
 
 def query_national_rail_availability(
-    origin_id: str,
-    destination_id: str,
+    origin_id: str = None,
+    destination_id: str = None,
     travel_date: Optional[str] = None,
+    **kwargs
 ) -> list[dict]:
     """
     Return national rail schedules that serve both origin and destination stations
     in the correct order, along with seat occupancy for the requested travel date.
     """
+    # 🛡️ 裝甲 1：超譯防呆！自動相容 AI 擅自改名的參數 (from_id / to_id)
+    origin_id = origin_id or kwargs.get("from_id")
+    destination_id = destination_id or kwargs.get("to_id")
+    
+    # 如果防呆後還是缺少必填參數，安全地回傳空陣列，避免資料庫崩潰
+    if not origin_id or not destination_id:
+        return []
+
     results = []
     
     with _connect() as conn:
@@ -97,25 +106,24 @@ def query_national_rail_availability(
             for sch in schedules:
                 raw_stops = sch.get("stops_in_order") or ""
                 
-                # 🛡️ 智慧相容解析邏輯：完美支援 JSON 陣列或傳統逗號分隔字串
+                # 🛡️ 裝甲 2：智慧型 JSON/字串 解析器，解決中括號雙引號的過濾問題
                 if isinstance(raw_stops, list):
                     stops = raw_stops
                 elif isinstance(raw_stops, str):
                     raw_stops = raw_stops.strip()
                     if raw_stops.startswith("["):
-                        import json
                         stops = json.loads(raw_stops)
                     else:
                         stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
                 else:
                     stops = []
                 
-                # 判斷起訖站是否都在這班車的停靠站清單內
+                # 判斷起訖站是否都在停靠清單內
                 if origin_id in stops and destination_id in stops:
                     orig_idx = stops.index(origin_id)
                     dest_idx = stops.index(destination_id)
                     
-                    # 確保發車站的順序早於目的地站（方向正確）
+                    # 確保行車方向正確（起點在終點前面）
                     if orig_idx < dest_idx:
                         sch_dict = dict(sch)
                         
@@ -143,11 +151,15 @@ def query_national_rail_availability(
 def query_national_rail_fare(
     schedule_id: str,
     fare_class: str,
-    stops_travelled: int,
+    stops_travelled: int | str,
+    **kwargs  # 🛡️ 裝甲 3：吸收 AI 亂塞的其他無效參數
 ) -> Optional[dict]:
     """
     Calculate the fare for a national rail journey.
     """
+    # 🛡️ 裝甲 4：強制型態轉換！徹底消滅「字串乘上浮點數」的大魔王錯誤
+    stops_travelled = int(stops_travelled)
+
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # 1. 從 schedules 表中撈出該班次的所有票價相關欄位
@@ -185,6 +197,8 @@ def query_national_rail_fare(
                 "per_stop_rate_usd": per_stop,
                 "total_fare_usd": total_fare
             }
+            
+            
 
 # ── METRO SCHEDULES & FARE ────────────────────────────────────────────────────
 
@@ -458,6 +472,7 @@ def execute_booking(
 
     # 2. 計算總票價 (如果是來回票 ticket_type == "return"，金額乘二)
     fare_info = query_national_rail_fare(schedule_id, fare_class, stops_travelled)
+    stops_travelled = int(stops_travelled)
     if not fare_info:
         return False, "Failed to calculate fare"
     amount_usd = fare_info["total_fare_usd"]
