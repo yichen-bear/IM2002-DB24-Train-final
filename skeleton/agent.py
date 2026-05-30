@@ -104,6 +104,7 @@ SYSTEM_PROMPT = """You are TransitFlow, a transit assistant for a dual-network s
 Networks: City Metro MS01-MS20 (lines M1-M4) | National Rail NR01-NR10 (lines NR1-NR2)
 Interchanges: Central=MS01/NR01 | Old Town=MS07/NR03 | Ferndale=MS15/NR07
 Today: {today}
+(IMPORTANT: All future dates including the year 2026 are completely valid for booking. Do not reject future dates.)
 
 LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first.
 
@@ -174,9 +175,9 @@ TOOLS = [
     {
         "name": "get_user_bookings",
         "description": (
-            "Retrieve the logged-in user's full booking history (national rail bookings + metro trips). "
-            "Use whenever the user asks about their tickets, journeys, or travel history. "
-            "Requires login — no parameters needed."
+            "Retrieve the logged-in user's PAST or EXISTING full booking history. "
+            "Use ONLY when the user wants to check/view their current tickets or history. "
+            "NEVER call this tool if the user is trying to make a NEW booking, reserve a ticket, or check train availability."
         ),
         "parameters": {},
         "required": [],
@@ -305,7 +306,16 @@ def _execute_tool(
             result = query_national_rail_availability(**params)
 
         elif tool_name == "get_national_rail_fare":
-            result = query_national_rail_fare(**params)
+            # 防呆檢查：如果模型瞎掰參數，或者漏掉必填的 schedule_id
+            if "schedule_id" not in params or "stops_travelled" not in params:
+                result = {"error": "Missing schedule_id or stops_travelled. You MUST call 'check_national_rail_availability' first to get the schedule_id and stops."}
+            else:
+                # 安全地提取參數，避免把奇怪的 key (如 '#') 丟給後端
+                result = query_national_rail_fare(
+                    schedule_id=params["schedule_id"],
+                    fare_class=params.get("fare_class", "standard"),
+                    stops_travelled=params["stops_travelled"]
+                )
 
         elif tool_name == "check_metro_availability":
             result = query_metro_schedules(
@@ -364,7 +374,7 @@ def _execute_tool(
                 destination_station_id=params["destination_station_id"],
                 travel_date=params["travel_date"],
                 fare_class=params["fare_class"],
-                seat_id=params["seat_id"],
+                seat_id=params.get("seat_id", "any"), # <== 如果模型漏給了，就自動帶入 "any" 交給系統派位
                 ticket_type=params.get("ticket_type", "single"),
             )
             result = data if ok else {"error": data}
@@ -581,6 +591,7 @@ STATIONS: Metro=MS01-MS20, Rail=NR01-NR10
 USER: {current_user_email or "not logged in"}
 get_user_bookings: call (no params) when logged-in user asks about their bookings, tickets, or travel history.
 make_booking/cancel_booking: only if user is logged in.
+Always use get_available_seats before make_booking to check seat layouts and IDs.
 Route/path/journey questions: use find_route. Policy questions: use search_policy.
 Never use "" as a param value. Omit optional params if unknown.
 
@@ -595,11 +606,11 @@ USER: "{_augmented_message}"
 Examples:
 "fastest route MS01 to MS14" -> {{"tool_calls": [{{"name": "find_route", "params": {{"origin_id": "MS01", "destination_id": "MS14", "optimise_by": "time"}}}}]}}
 "cheapest NR01 to NR05" -> {{"tool_calls": [{{"name": "find_route", "params": {{"origin_id": "NR01", "destination_id": "NR05", "optimise_by": "cost"}}}}]}}
-"trains NR01 to NR03 on 2025-06-01" -> {{"tool_calls": [{{"name": "check_national_rail_availability", "params": {{"origin_id": "NR01", "destination_id": "NR03", "travel_date": "2025-06-01"}}}}]}}
+"trains NR01 to NR03 on 2026-06-01" -> {{"tool_calls": [{{"name": "check_national_rail_availability", "params": {{"origin_id": "NR01", "destination_id": "NR03", "travel_date": "2025-06-01"}}}}]}}
 "refund policy" -> {{"tool_calls": [{{"name": "search_policy", "params": {{"query": "refund policy"}}}}]}}
 "hello" -> {{"tool_calls": []}}
 "show my bookings" -> {{"tool_calls": [{{"name": "get_user_bookings", "params": {{}}}}]}}
-"book me a seat NR01 to NR05 on 2025-06-01" -> {{"tool_calls": [{{"name": "check_national_rail_availability", "params": {{"origin_id": "NR01", "destination_id": "NR05", "travel_date": "2025-06-01"}}}}]}}
+"book me a seat NR01 to NR05 on 2026-06-01" -> {{"tool_calls": [{{"name": "check_national_rail_availability", "params": {{"origin_id": "NR01", "destination_id": "NR05", "travel_date": "2025-06-01"}}}}]}}
 
 JSON:"""
 
@@ -611,9 +622,8 @@ JSON:"""
             system_prompt=(
                 "You are a tool router. Call the right tool based on the user message. "
                 f"Logged-in user: {current_user_email or 'none'}. "
-                "My bookings/tickets/travel history → get_user_bookings (no params). "
-                "Book a ticket / make a booking → check_national_rail_availability first, then make_booking. "
-                "Cancel a booking → cancel_booking. "
+                "View or check existing past history/tickets → get_user_bookings (no params). "
+                "If the user wants to CREATE a new booking, MAKE a new reservation, or book a seat → you MUST call check_national_rail_availability first! NEVER call get_user_bookings for making new reservations."
                 "Policy/rules/conduct/compensation/luggage/bicycle questions → search_policy. "
                 "Route/directions/fastest/quickest/how-to-get/path questions → find_route ONLY (never get_metro_fare). "
                 "Metro fare/price/cost/how-much-does-it-cost questions → get_metro_fare. "
@@ -638,8 +648,13 @@ JSON:"""
     # Rules below cover every common query type.  Each rule only fires when the
     # correct tool is not already selected with valid required params.
     _lower = _augmented_message.lower()
-    _station_ids = re.findall(r'\b(MS\d{2}|NR\d{2})\b', _augmented_message, re.IGNORECASE)
+    _raw_ids = re.findall(r'\b(MS\d{2}|NR\d{2})\b', _augmented_message, re.IGNORECASE)
+    # 利用 dict.fromkeys 去除連續重複的代號，同時保留原本 起點 -> 終點 的順序
+    _station_ids = list(dict.fromkeys(sid.upper() for sid in _raw_ids))
     _two_stations = len(_station_ids) >= 2
+
+    _schedule_matches = re.findall(r'(NR_SCH\d{2}|MS_SCH\d{2})', _augmented_message, re.IGNORECASE)
+    _has_schedule = len(_schedule_matches) > 0
 
     def _tool_selected(name: str, *required_params) -> bool:
         """Return True only if tool `name` is in tool_calls with all required params set."""
@@ -670,9 +685,10 @@ JSON:"""
                   "route query")
 
     # 2. Availability / trains / schedules between two stations
-    elif not tool_calls and _two_stations:
+    elif not tool_calls and _two_stations and not _has_schedule:
         _avail_triggers = {"train", "trains", "service", "services", "run from", "runs from",
-                           "schedule", "timetable", "available", "availability"}
+                           "schedule", "timetable", "available", "availability",
+                           "book", "booking", "reserve", "reservation", "ticket"}
         if any(kw in _lower for kw in _avail_triggers):
             o, d = _station_ids[0].upper(), _station_ids[1].upper()
             _travel_date = next(
