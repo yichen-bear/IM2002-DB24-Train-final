@@ -564,7 +564,13 @@ def execute_booking(
             if not res or not res[0]:
                 return False, "Schedule not found"
             
-            stops = [s.strip() for s in res[0].split(",") if s.strip()]
+            # ✅ 改良版的 JSON 解析邏局
+            raw_stops = res[0]
+            if isinstance(raw_stops, str) and raw_stops.strip().startswith("["):
+                import json
+                stops = json.loads(raw_stops)
+            else:
+                stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
             if origin_station_id not in stops or destination_station_id not in stops:
                 return False, "Invalid origin or destination for this schedule"
             
