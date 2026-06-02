@@ -48,7 +48,6 @@
 -- ============================================================
 
 -- ============================================================
--- 第一卷: 安全驗證與用戶基礎架構
 -- Section 1: Security Verification and User Infrastructure
 -- ============================================================
 
@@ -70,7 +69,6 @@ CREATE TABLE IF NOT EXISTS users (
     is_active       BOOLEAN DEFAULT TRUE
 );
 
--- 密碼獨立表（user_id 與 password 不在同張表）
 -- ------------------------------------------------------------
 -- Table: user_credentials
 -- Description: Manages sensitive authentication data by separating 
@@ -88,7 +86,7 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 );
 
 -- ============================================================
--- 第五卷: 基礎設施與路網站點架構
+
 -- Section 5: Infrastructure and Transit Network Architecture
 -- ============================================================
 
@@ -148,7 +146,6 @@ CREATE TABLE IF NOT EXISTS station_adjacencies (
 );
 
 -- ============================================================
--- 第七卷: 退款政策
 -- Section 7: Refund and Cancellation Policies
 -- ============================================================
 
@@ -264,7 +261,6 @@ CREATE TABLE IF NOT EXISTS refund_compensation_rules (
 );
 
 -- ============================================================
--- 第二卷: 路網、班次與座位
 -- Section 2: Networks, Timetables, and Seating Asset Management
 -- ============================================================
 
@@ -410,7 +406,6 @@ CREATE TABLE IF NOT EXISTS rail_seats (
 );
 
 -- ============================================================
--- 第六卷: 旅遊紀錄與回饋
 -- Section 6: Travel History, Ticket Bookings, and User Feedback
 -- ============================================================
 
@@ -552,7 +547,6 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 -- ============================================================
--- 第三卷: 金流
 -- Section 3: Financials and Payment Processing
 -- ============================================================
 
