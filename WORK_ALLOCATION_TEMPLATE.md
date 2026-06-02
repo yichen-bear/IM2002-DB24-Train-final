@@ -73,6 +73,7 @@ If nothing changed, write "No changes."
 | Change | Original plan | Revised plan | Reason |
 |--------|--------------|-------------|--------|
 | | | | |
+No changes.
 
 ---
 
@@ -85,4 +86,5 @@ We confirm that this work allocation accurately reflects how responsibilities we
 | | | |
 | 邱鈺婷 | 邱鈺婷 | 2026/6/2 |
 | 呂怡柔 | 呂怡柔 | 2026/6/2 |
+| 熊浥辰 | 熊浥辰 | 2026/6/2 |
 
