@@ -722,7 +722,7 @@ CREATE TABLE IF NOT EXISTS policy_documents (
     embedding   vector(768),
     source_file VARCHAR(200),
     created_at  TIMESTAMPTZ  DEFAULT NOW()
-)
+);
 
 -- Index for fast cosine similarity search
 CREATE INDEX IF NOT EXISTS idx_policy_embedding ON policy_documents USING hnsw (embedding vector_cosine_ops);
