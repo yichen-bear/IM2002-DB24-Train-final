@@ -151,6 +151,10 @@ CREATE TABLE IF NOT EXISTS station_adjacencies (
 
     CONSTRAINT chk_network_type
         CHECK (network_type IN ('metro', 'national_rail'))
+
+    -- [DESIGN RATIONALE] 
+    -- Standard Foreign Keys are omitted here because this table handles a polymorphic association across two distinct tables (metro_stations & national_rail_stations).
+    -- Data integrity is instead guaranteed via application logic and Neo4j graph validation.
 );
 
 -- ============================================================
