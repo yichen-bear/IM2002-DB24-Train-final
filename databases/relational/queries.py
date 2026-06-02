@@ -563,8 +563,6 @@ def execute_booking(
             res = cur.fetchone()
             if not res or not res[0]:
                 return False, "Schedule not found"
-            
-            # ✅ 改良版的 JSON 解析邏局
             raw_stops = res[0]
             if isinstance(raw_stops, str) and raw_stops.strip().startswith("["):
                 import json

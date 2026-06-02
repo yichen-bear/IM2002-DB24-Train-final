@@ -590,7 +590,6 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 -- ============================================================
--- 第四卷: 地鐵刷卡日誌
 -- Section 4: Metro Access and Turnstile Gate Logs
 -- ============================================================
 
@@ -628,7 +627,6 @@ CREATE TABLE IF NOT EXISTS metro_access_logs (
 );
 
 -- ============================================================
--- 第八卷: Booking Rules
 -- Section 8: Commercial Ticketing and Allocation Rules
 -- ============================================================
 
@@ -715,7 +713,6 @@ CREATE TABLE IF NOT EXISTS booking_rule_params (
 );
 
 -- ============================================================
--- 第九卷: Travel Policies
 -- Section 9: Legal Travel Policies and Compliance Rules
 -- ============================================================
 
