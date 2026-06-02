@@ -11,7 +11,7 @@
 | Full Name | Student ID | GitHub Username | Email |
 |-----------|-----------|----------------|-------|
 | 熊浥辰 | 113403047 | yichen-bear | sophie20060705@gmail.com |
-| 邱鈺婷 | 113403034 | yuting0308 | tephanie71206@gmail.com |
+| 邱鈺婷 | 113403034 | yuting0308 | stephanie71206@gmail.com |
 | 呂怡柔 | 113101507 | catherinenoriy-arch | catherine.noriy@gmail.com |
 
 ---
@@ -83,7 +83,6 @@ We confirm that this work allocation accurately reflects how responsibilities we
 
 | Name | Signature / Typed name | Date |
 |------|----------------------|------|
-| | | |
 | 邱鈺婷 | 邱鈺婷 | 2026/6/2 |
 | 呂怡柔 | 呂怡柔 | 2026/6/2 |
 | 熊浥辰 | 熊浥辰 | 2026/6/2 |
