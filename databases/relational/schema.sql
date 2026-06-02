@@ -27,16 +27,24 @@
 --  Apply your schema with:
 --    docker-compose down -v && docker-compose up -d
 -- ============================================================
+--DESIGN DECISIONS & RATIONALE (Grading Requirements)
 -- ============================================================
---  STUDENT TASK — Relational Tables (V9.0 Schema)
--- ============================================================
-
--- ------------------------------------------------------------
--- ============================================================
---  STUDENT TASK — Relational Tables (V9.0 Schema Perfected)
--- ============================================================
-
-
+-- 1. Primary Key (PK) Selection Strategy:
+--    - VARCHAR(32) (UUID/HashIDs): Used for core business entities (e.g., users, 
+--      bookings, payments, schedules). This prevents ID guessing attacks (Insecure 
+--      Direct Object Reference) and is ideal for distributed systems.
+--    - SERIAL / BIGINT IDENTITY: Used for append-only logs (e.g., metro_access_logs) 
+--      and static references (e.g., policy_documents) where insert performance and 
+--      chronological sorting are prioritized over external security.
+--
+-- 2. Data Deletion Strategy (Soft vs. Hard Delete):
+--    - Soft Delete (is_active BOOLEAN): Implemented in the 'users' table. This ensures 
+--      historical data integrity, preventing Foreign Key constraint violations in 
+--      financial records (payments) and travel history (bookings).
+--    - Hard Delete (ON DELETE CASCADE): Applied to sensitive or strictly dependent 
+--      child tables (e.g., user_credentials, rail_seats). When a parent record is 
+--      removed, these records are physically deleted to comply with security 
+--      standards and prevent orphaned data.
 
 -- ============================================================
 --  VECTOR SCHEMA  (RAG / Help Desk) — do not modify
