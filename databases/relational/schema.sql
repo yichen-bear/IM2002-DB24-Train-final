@@ -49,8 +49,15 @@
 
 -- ============================================================
 -- 第一卷: 安全驗證與用戶基礎架構
+-- Section 1: Security Verification and User Infrastructure
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: users
+-- Description: Stores the profile and demographic information of 
+--              registered transit passengers. It holds non-sensitive 
+--              personal details while referencing security credentials.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     user_id         VARCHAR(32)  PRIMARY KEY,
     username        VARCHAR(50)  NOT NULL UNIQUE,
@@ -64,6 +71,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- 密碼獨立表（user_id 與 password 不在同張表）
+-- ------------------------------------------------------------
+-- Table: user_credentials
+-- Description: Manages sensitive authentication data by separating 
+--              password and security answer hashes from the main users table 
+--              to comply with security and isolation design patterns.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_credentials (
     user_id            VARCHAR(32) PRIMARY KEY,
     password_hash      TEXT NOT NULL,
@@ -76,8 +89,15 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 
 -- ============================================================
 -- 第五卷: 基礎設施與路網站點架構
+-- Section 5: Infrastructure and Transit Network Architecture
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: metro_stations
+-- Description: Contains configuration data for stations operating 
+--              on the urban Metro network, including details on 
+--              inter-system transfers to other lines or National Rail.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS metro_stations (
     station_id                    VARCHAR(32) PRIMARY KEY,
     name                          VARCHAR(100) NOT NULL,
@@ -88,6 +108,12 @@ CREATE TABLE IF NOT EXISTS metro_stations (
     interchange_national_rail_station_id VARCHAR(32)
 );
 
+-- ------------------------------------------------------------
+-- Table: national_rail_stations
+-- Description: Contains configuration data for stations operating 
+--              on the long-distance National Rail network, managing 
+--              transfer links back to the urban Metro system.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS national_rail_stations (
     station_id                    VARCHAR(32) PRIMARY KEY,
     name                          VARCHAR(100) NOT NULL,
@@ -98,6 +124,12 @@ CREATE TABLE IF NOT EXISTS national_rail_stations (
     interchange_metro_station_id  VARCHAR(32)
 );
 
+-- ------------------------------------------------------------
+-- Table: station_adjacencies
+-- Description: Models graph edges between adjacent stations within 
+--              both Metro and National Rail networks, specifying 
+--              transit lines and exact travel times for routing engines.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS station_adjacencies (
     source_station_id   VARCHAR(32) NOT NULL,
     adjacent_station_id VARCHAR(32) NOT NULL,
@@ -117,8 +149,15 @@ CREATE TABLE IF NOT EXISTS station_adjacencies (
 
 -- ============================================================
 -- 第七卷: 退款政策
+-- Section 7: Refund and Cancellation Policies
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: refund_policies
+-- Description: Defines top-level rules governing ticket cancellations 
+--              and refunds for normal and express transit services, 
+--              enforcing system-wide deadlines and validity dates.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS refund_policies (
     policy_id                      VARCHAR(32) PRIMARY KEY,
     service_type                   VARCHAR(20) NOT NULL,
@@ -141,6 +180,12 @@ CREATE TABLE IF NOT EXISTS refund_policies (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: refund_cancellation_windows
+-- Description: Manages multi-tiered refund percentages based on how 
+--              far in advance a cancellation occurs before departure, 
+--              including deduction of administrative processing fees.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS refund_cancellation_windows (
     window_id                  VARCHAR(32) PRIMARY KEY,
     policy_id                  VARCHAR(32) NOT NULL,
@@ -171,6 +216,12 @@ CREATE TABLE IF NOT EXISTS refund_cancellation_windows (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: refund_compensation_rules
+-- Description: Defines customer compensation rules when transit services 
+--              experience exceptional disruptions (e.g., cancellations, 
+--              route modifications, or specific delay thresholds).
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS refund_compensation_rules (
     compensation_id         VARCHAR(32) PRIMARY KEY,
     policy_id               VARCHAR(32) NOT NULL,
@@ -214,8 +265,15 @@ CREATE TABLE IF NOT EXISTS refund_compensation_rules (
 
 -- ============================================================
 -- 第二卷: 路網、班次與座位
+-- Section 2: Networks, Timetables, and Seating Asset Management
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: schedules
+-- Description: Master timetable definitions for the National Rail network. 
+--              Contains explicit geographic origins/destinations, operational 
+--              directions, multi-tiered pricing matrices, and refund policies.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schedules (
     schedule_id            VARCHAR(32) PRIMARY KEY,
     route_id               VARCHAR(32) NOT NULL,
@@ -266,6 +324,12 @@ CREATE TABLE IF NOT EXISTS schedules (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: metro_schedules
+-- Description: Timetable frameworks for urban Metro lines, organizing 
+--              high-frequency operations by interval (headway) rather 
+--              than individual departure slots, with dedicated distance fares.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS metro_schedules (
     metro_schedule_id      VARCHAR(32) PRIMARY KEY,
     line                   VARCHAR(50) NOT NULL,
@@ -304,6 +368,12 @@ CREATE TABLE IF NOT EXISTS metro_schedules (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: rail_coaches
+-- Description: Represents individual passenger physical carriages assigned 
+--              to National Rail schedules, enforcing compartment numbering 
+--              and cabin service classes ('standard' or 'first').
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS rail_coaches (
     coach_id     VARCHAR(32) PRIMARY KEY,
     schedule_id  VARCHAR(32) NOT NULL,
@@ -318,6 +388,12 @@ CREATE TABLE IF NOT EXISTS rail_coaches (
         CHECK (fare_class IN ('standard', 'first'))
 );
 
+-- ------------------------------------------------------------
+-- Table: rail_seats
+-- Description: Tracks concrete physical seating assets within coaches, 
+--              recording spatial layout identifiers (rows/columns) 
+--              and current real-time inventory booking status.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS rail_seats (
     seat_real_id VARCHAR(64) PRIMARY KEY,
     coach_id      VARCHAR(32) NOT NULL,
@@ -335,8 +411,15 @@ CREATE TABLE IF NOT EXISTS rail_seats (
 
 -- ============================================================
 -- 第六卷: 旅遊紀錄與回饋
+-- Section 6: Travel History, Ticket Bookings, and User Feedback
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: bookings
+-- Description: Records commercial ticketing transactions for National Rail, 
+--              capturing reserved seats, specialized routing endpoints, 
+--              passenger statuses, and precise scheduling dates.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS bookings (
     booking_id              VARCHAR(32) PRIMARY KEY,
     user_id                 VARCHAR(32) NOT NULL,
@@ -392,6 +475,12 @@ CREATE TABLE IF NOT EXISTS bookings (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: metro_travel_history
+-- Description: Historical logs of completed or cancelled user journeys 
+--              on the Metro line, distinguishing single trips from 
+--              unlimited day-pass structures.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS metro_travel_history (
     trip_id                 VARCHAR(32) PRIMARY KEY,
     user_id                 VARCHAR(32) NOT NULL,
@@ -434,6 +523,12 @@ CREATE TABLE IF NOT EXISTS metro_travel_history (
         CHECK (status IN ('completed', 'cancelled'))
 );
 
+-- ------------------------------------------------------------
+-- Table: feedback
+-- Description: Collects post-travel quantitative ratings and text 
+--              commentary from passengers to review overall transit 
+--              service quality.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS feedback (
     feedback_id  VARCHAR(32) PRIMARY KEY,
 
@@ -458,8 +553,15 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 -- ============================================================
 -- 第三卷: 金流
+-- Section 3: Financials and Payment Processing
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: payments
+-- Description: Tracks monetary ledger operations including payments 
+--              and subsequent balancing refunds. Utilizes self-referential 
+--              keys to tie credit refunds directly to parent purchases.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS payments (
     payment_id        VARCHAR(32) PRIMARY KEY,
 
@@ -495,8 +597,15 @@ CREATE TABLE IF NOT EXISTS payments (
 
 -- ============================================================
 -- 第四卷: 地鐵刷卡日誌
+-- Section 4: Metro Access and Turnstile Gate Logs
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: metro_access_logs
+-- Description: Real-time turnstile telemetry data recording exact 
+--              check-in and check-out events at stations to calculate 
+--              fares and dynamic route validation.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS metro_access_logs (
     log_id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
 
@@ -526,8 +635,15 @@ CREATE TABLE IF NOT EXISTS metro_access_logs (
 
 -- ============================================================
 -- 第八卷: Booking Rules
+-- Section 8: Commercial Ticketing and Allocation Rules
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: booking_rule_sets
+-- Description: Version-controlled system configurations managing 
+--              active parameters for purchasing windows, maximum limits, 
+--              and commercial permissions across both systems.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS booking_rule_sets (
     rule_set_id     VARCHAR(32) PRIMARY KEY,
 
@@ -557,6 +673,12 @@ CREATE TABLE IF NOT EXISTS booking_rule_sets (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: booking_rule_params
+-- Description: Concrete key-value pairs assigned to active rule sets, 
+--              specifying granular policies categorized by ticket type 
+--              and class (e.g., baggage weights or reservation thresholds).
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS booking_rule_params (
     param_id BIGSERIAL PRIMARY KEY,
 
@@ -600,8 +722,15 @@ CREATE TABLE IF NOT EXISTS booking_rule_params (
 
 -- ============================================================
 -- 第九卷: Travel Policies
+-- Section 9: Legal Travel Policies and Compliance Rules
 -- ============================================================
 
+-- ------------------------------------------------------------
+-- Table: policy_categories
+-- Description: Structural lookup catalog grouping legal travel regulations 
+--              and passenger conduct rules, offering multi-lingual 
+--              (Chinese/English) terminology display settings.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS policy_categories (
     category_id     VARCHAR(32) PRIMARY KEY,
 
@@ -626,6 +755,12 @@ CREATE TABLE IF NOT EXISTS policy_categories (
         )
 );
 
+-- ------------------------------------------------------------
+-- Table: policy_rules
+-- Description: Contains explicit passenger governance constraints 
+--              (e.g., allowance of pets, heavy carriage items, behavior 
+--              prohibitions) tied back to specific network ticket categories.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS policy_rules (
     rule_id VARCHAR(32) PRIMARY KEY,
 
@@ -711,6 +846,12 @@ CREATE INDEX IF NOT EXISTS idx_metro_logs_user ON metro_access_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_metro_history_user ON metro_travel_history(user_id);
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- ------------------------------------------------------------
+-- Table: policy_documents
+-- Description: Stores raw text items of policy regulations mapped 
+--              to high-dimensional vector embeddings, allowing cognitive 
+--              RAG / customer support help desks to perform vector semantic lookups.
+-- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS policy_documents (
     id          SERIAL       PRIMARY KEY,
     title       VARCHAR(200) NOT NULL,

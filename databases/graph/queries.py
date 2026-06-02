@@ -56,9 +56,22 @@ def query_shortest_route(
     network: str = "auto",
 ) -> dict:
     """
-    找出從起點到終點的最快路徑 (最短旅行時間)。
+    Find the fastest route between an origin station and a destination station.
+    
+    This function utilizes the APOC Dijkstra algorithm to compute the shortest 
+    path based on total travel time, allowing transit via METRO_LINK, RAIL_LINK, 
+    and INTERCHANGE relationships.
+
+    Args:
+        origin_id (str): The station_id of the departure station.
+        destination_id (str): The station_id of the arrival station.
+        network (str, optional): Target transit network constraint. Defaults to "auto".
+
+    Returns:
+        dict: A dictionary containing route information (found status, total time, 
+              sequential list of stations, and detailed travel legs).
     """
-    # 我們允許路徑走 METRO_LINK、RAIL_LINK 或是 INTERCHANGE 轉乘
+    # Allow the path to traverse METRO_LINK, RAIL_LINK, or INTERCHANGE relations
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
@@ -95,8 +108,8 @@ def query_shortest_route(
             for rel in path.relationships:
                 legs.append({
                     "type": rel.type,
-                    "line": rel.get("line", "Interchange"), # 如果是轉乘可能沒有line屬性
-                    "travel_time_min": rel.get("travel_time_min", 0) # 轉乘時間若沒設預設為0
+                    "line": rel.get("line", "Interchange"), # Fallback to Interchange if line property is absent
+                    "travel_time_min": rel.get("travel_time_min", 0) # Default to 0 mins if transfer time is not set
                 })
 
             return {
@@ -119,9 +132,22 @@ def query_cheapest_route(
 ) -> dict:
     """
     Find the cheapest path between two stations, minimising total estimated fare.
-    (Since explicit fare weights aren't in Neo4j, we estimate by finding the fewest stops/hops).
+    
+    Since explicit monetary fare weights are not directly stored as graph weights, 
+    this function leverages Neo4j's built-in shortestPath to estimate the cheapest 
+    route by minimizing the total number of intermediate station hops and transfers.
+
+    Args:
+        origin_id (str): The station_id of the departure station.
+        destination_id (str): The station_id of the arrival station.
+        network (str, optional): Target transit network constraint. Defaults to "auto".
+        fare_class (str, optional): Ticket class tier (e.g., standard, first). Defaults to "standard".
+
+    Returns:
+        dict: A dictionary containing details of the path with the fewest hops, 
+              including the list of stations visited and network legs.
     """
-    # 使用 Neo4j 內建的 shortestPath，它會預設尋找「經過節點最少 (最少站)」的路徑
+    # Use Neo4j's native shortestPath, which defaults to finding paths with the fewest nodes/hops
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
@@ -148,14 +174,14 @@ def query_cheapest_route(
             stations = []
             legs = []
             
-            # 解析途經車站
+            # Parse all stations along the route
             for node in path.nodes:
                 stations.append({
                     "station_id": node.get("station_id"),
                     "name": node.get("name")
                 })
                 
-            # 解析搭乘區段
+            # Parse transit legs/segments
             for rel in path.relationships:
                 legs.append({
                     "type": rel.type,
@@ -168,8 +194,8 @@ def query_cheapest_route(
                 "origin_id": origin_id,
                 "destination_id": destination_id,
                 "fare_class": fare_class,
-                "estimated_fare_strategy": "fewest_stops", # 告知 AI 這是用最少站數估算的
-                "total_hops": total_hops,                  # 總共搭了幾站
+                "estimated_fare_strategy": "fewest_stops", # Inform the AI agent that estimation is based on minimal stops
+                "total_hops": total_hops,                  # Total number of stations traversed
                 "stations": stations,
                 "legs": legs
             }
@@ -184,10 +210,24 @@ def query_alternative_routes(
     network: str = "auto",
 ) -> dict:
     """
-    Finds the shortest path avoiding a specific station (e.g., due to closure or delay).
+    Find the shortest alternative route between two stations that completely avoids 
+    a specific station.
+    
+    This query is typically utilized during unexpected station closures, maintenance, 
+    or severe delays, ensuring the excluded station is filtered out from the path evaluation.
+
+    Args:
+        origin_id (str): The station_id of the departure station.
+        destination_id (str): The station_id of the arrival station.
+        avoid_station_id (str): The station_id that must be excluded from the path.
+        network (str, optional): Target transit network constraint. Defaults to "auto".
+
+    Returns:
+        dict: A dictionary containing the alternative route details if found, 
+              or a failure message if no detour exists.
     """
-    # 關鍵語法：WHERE ALL(node IN nodes(path) WHERE node.station_id <> $avoid_station_id)
-    # 這行會強制 Neo4j 在找路時，只要碰到避開的車站就回頭找別條路。
+    # Key Syntax: WHERE ALL(node IN nodes(path) WHERE node.station_id <> $avoid_station_id)
+    # This clause forces Neo4j to filter out any paths that intersect with the disrupted station.
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
@@ -207,13 +247,13 @@ def query_alternative_routes(
             record = result.single()
             
             if not record:
-                return {
+                return [{
                     "found": False,
                     "origin_id": origin_id,
                     "destination_id": destination_id,
                     "avoid_station_id": avoid_station_id,
                     "message": f"No alternative route found avoiding {avoid_station_id}."
-                }
+                }]
             
             path = record["path"]
             total_hops = record["total_hops"]
@@ -243,16 +283,27 @@ def query_alternative_routes(
                 "stations": stations,
                 "legs": legs
             }
-            
+
 
 # ── CROSS-NETWORK INTERCHANGE PATH ───────────────────────────────────────────
 
 def query_interchange_path(origin_id: str, destination_id: str) -> dict:
     """
-    Find a path between a metro station and a national rail station (or vice versa)
-    crossing the network boundary via interchange relationships.
+    Find a route between a city metro station and a national rail station (or vice versa).
+    
+    This function explicitly searches for paths that cross network boundaries by 
+    enforcing that the path must contain at least one INTERCHANGE relationship type.
+
+    Args:
+        origin_id (str): The station_id of the departure station.
+        destination_id (str): The station_id of the arrival station.
+
+    Returns:
+        dict: A dictionary containing multi-modal journey details, including 
+              the total aggregated travel time, hop counts, and precise cross-network 
+              interchange points.
     """
-    # 強制路徑中必須包含至少一段 INTERCHANGE 連線
+    # Enforce that the path must include at least one relationship with the type 'INTERCHANGE'
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
@@ -295,7 +346,7 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                     "line": rel.get("line", "Interchange"),
                     "travel_time_min": rel.get("travel_time_min", 0)
                 })
-                # 紀錄在哪裡發生了轉乘
+                # Log and map the coordinates where network transfers happen
                 if rel_type == 'INTERCHANGE':
                     interchange_points.append({
                         "from_station": rel.start_node.get("station_id"),
@@ -318,9 +369,20 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
 
 def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     """
-    找出受故障車站波及的周圍車站（N 步之內的所有車站）。
+    Analyze and identify neighboring stations affected by a disruption at a specific station.
+    
+    This function tracks the ripple effect of delays or closures by scanning all 
+    stations within a designated variable degree of separation (N hops) from the incident station.
+
+    Args:
+        delayed_station_id (str): The station_id experiencing technical issues or delays.
+        hops (int, optional): The maximum radius (graph distance) to search. Defaults to 2.
+
+    Returns:
+        list[dict]: A list of affected station records, capturing their distance from 
+                    the root disruption and the transit lines impacted.
     """
-    # 透過 *1..$hops 語法，找出從故障站出發，在指定步數內可以走到的所有相鄰站
+    # Use the *1..$hops syntax to discover neighboring nodes within N steps from the source disruption
     cypher_query = """
     MATCH (disrupted {station_id: $delayed_station_id})
     MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE*1..$hops]-(affected)
@@ -337,15 +399,15 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
             result = session.run(cypher_query, delayed_station_id=delayed_station_id, hops=hops)
             
             ripple_effects = []
-            seen_stations = set() # 用來避免同一個車站在不同路徑被重複算到
+            seen_stations = set() # Set to prevent recording duplicate stations via multi-path intersections
             
             for record in result:
                 st_id = record["station_id"]
-                # 確保同一個車站只保留最短的那次步數
+                # Guarantee that each station is only processed once, preserving the minimal hop distance
                 if st_id not in seen_stations:
                     seen_stations.add(st_id)
                     
-                    # 整理受影響的路線清單（去除重複的轉乘標籤）
+                    # Consolidate and clean up unique lines involved (filtering out generic interchange tags)
                     lines = list(set(record["lines_involved"]))
                     if "Interchange" in lines and len(lines) > 1:
                         lines.remove("Interchange")
@@ -364,9 +426,19 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
 
 def query_station_connections(station_id: str) -> list[dict]:
     """
-    列出指定車站所有直接相連（直達）的相鄰車站與路線資訊。
+    Fetch all direct, next-stop adjacent stations linked to the specified station.
+    
+    This function lists out immediate physical connections across either the metro 
+    network or national rail systems without any node label constraints.
+
+    Args:
+        station_id (str): The station_id of the central station to look up.
+
+    Returns:
+        list[dict]: A list of dictionaries detailing adjacent station profiles, 
+                    operating line names, and connection types (metro vs. national_rail).
     """
-    # 這裡我們不限節點 Label，只要關係是 METRO_LINK 或 RAIL_LINK 就找出來
+    # Query targets both METRO_LINK and RAIL_LINK to trace adjacent nodes
     cypher_query = """
     MATCH (start {station_id: $station_id})-[r:METRO_LINK|RAIL_LINK]->(neighbor)
     RETURN neighbor.station_id AS station_id,
@@ -392,5 +464,3 @@ def query_station_connections(station_id: str) -> list[dict]:
                 })
                 
             return connections
-        
-        
