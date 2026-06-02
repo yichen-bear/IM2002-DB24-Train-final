@@ -84,4 +84,5 @@ We confirm that this work allocation accurately reflects how responsibilities we
 |------|----------------------|------|
 | | | |
 | 邱鈺婷 | 邱鈺婷 | 2026/6/2 |
-| | | |
+| 呂怡柔 | 呂怡柔 | 2026/6/2 |
+
