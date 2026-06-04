@@ -63,14 +63,14 @@ def seed_metro_stations(cur):
         stations_rows.append((
             s["station_id"],
             s["name"],
-            s.get("lines", []),  # 直接傳入陣列
+            s.get("lines", []),  
             s["is_interchange_metro"],
-            s.get("interchange_metro_lines", []), # 同學多開的這個陣列也要傳
+            s.get("interchange_metro_lines", []), 
             s["is_interchange_national_rail"],
             s.get("interchange_national_rail_station_id")
         ))
 
-    # 直接將 7 個欄位寫入主表
+    # Insert 7 columns directly into the main table
     n_stations = insert_many(
         cur, 
         "metro_stations", 
@@ -120,129 +120,141 @@ def seed_national_rail_stations(cur):
     print(f"  national_rail_stations: {n_stations} rows")
 
 
-
-
 def seed_metro_schedules(cur):
     data = load("metro_schedules.json")
-    rows = []
+    sched_rows = []
+    stops_rows = []
     
     for sch in data:
-        # 將 JSON 的陣列與字典直接轉換為字串 (配合 schema 的 TEXT 欄位)
-        stops_json = json.dumps(sch.get("stops_in_order", []))
-        
-        # 注意：JSON 裡的 key 是 travel_time_from_origin_min，Schema 改叫 travel_time_offset
-        travel_time_json = json.dumps(sch.get("travel_time_from_origin_min", {}))
-        
-        # 營運日 (operates_on) 在 Schema 是 VARCHAR，我們轉成逗號分隔字串
         operates_on_str = ",".join(sch.get("operates_on", []))
+        sched_id = sch["schedule_id"]
         
-        # 嚴格對齊同學在 metro_schedules 開的 13 個欄位
-        rows.append((
-            sch["schedule_id"],                   # 1. metro_schedule_id (JSON裡叫 schedule_id)
-            sch["line"],                          # 2. line
-            sch.get("direction"),                 # 3. direction
-            sch.get("origin_station_id"),         # 4. origin_station_id
-            sch.get("destination_station_id"),    # 5. destination_station_id
-            sch["first_train_time"],              # 6. first_train_time
-            sch["last_train_time"],               # 7. last_train_time
-            sch["frequency_min"],                 # 8. frequency_min
-            stops_json,                           # 9. stops_in_order
-            travel_time_json,                     # 10. travel_time_offset
-            sch["base_fare_usd"],                 # 11. base_fare_usd
-            sch["per_stop_rate_usd"],             # 12. per_stop_rate_usd
-            operates_on_str                       # 13. operates_on
+        # 1. Collect master table rows (11 columns matching schema perfectly)
+        sched_rows.append((
+            sched_id,                             # metro_schedule_id
+            sch["line"],                          # line
+            sch.get("direction"),                 # direction
+            sch.get("origin_station_id"),         # origin_station_id
+            sch.get("destination_station_id"),    # destination_station_id
+            sch["first_train_time"],              # first_train_time
+            sch["last_train_time"],               # last_train_time
+            sch["frequency_min"],                 # frequency_min
+            sch["base_fare_usd"],                 # base_fare_usd
+            sch["per_stop_rate_usd"],             # per_stop_rate_usd
+            operates_on_str                       # operates_on
         ))
+        
+        # 2. Flatten JSON array and dictionary into rows for junction table
+        stops_list = sch.get("stops_in_order", [])
+        offsets_dict = sch.get("travel_time_from_origin_min", {})
+        
+        for idx, station_id in enumerate(stops_list, start=1):
+            offset = offsets_dict.get(station_id, 0)
+            stops_rows.append((
+                sched_id,
+                station_id,
+                idx,  # stop_order (1=Origin, 2=Next...)
+                offset
+            ))
 
-    # 欄位名稱清單完全對齊 schema.sql
     columns = [
         "metro_schedule_id", "line", "direction", 
         "origin_station_id", "destination_station_id",
         "first_train_time", "last_train_time", 
-        "frequency_min", "stops_in_order", "travel_time_offset",
-        "base_fare_usd", "per_stop_rate_usd", "operates_on"
+        "frequency_min", "base_fare_usd", "per_stop_rate_usd", "operates_on"
     ]
-    
-    n_sch = insert_many(cur, "metro_schedules", columns, rows)
+    n_sch = insert_many(cur, "metro_schedules", columns, sched_rows)
     print(f"  metro_schedules: {n_sch} rows")
+    
+    stop_columns = ["metro_schedule_id", "station_id", "stop_order", "travel_time_offset"]
+    n_stops = insert_many(cur, "metro_schedule_stops", stop_columns, stops_rows)
+    print(f"  metro_schedule_stops: {n_stops} rows")
 
 
 def seed_national_rail_schedules(cur):
     data = load("national_rail_schedules.json")
     schedules_rows = []
+    stops_rows = []
     
     for sch in data:
-        # 將陣列與字典轉換為字串
-        stops_json = json.dumps(sch.get("stops_in_order", []))
-        travel_time_json = json.dumps(sch.get("travel_time_from_origin_min", {}))
         operates_on_str = ",".join(sch.get("operates_on", []))
+        sched_id = sch["schedule_id"]
         
-        # 這裡嚴格對齊 20 個值，一個都不能少
+        # 1. Collect master table rows (17 columns matching normalized schema)
         schedules_rows.append((
-            sch["schedule_id"],                                   # 1. schedule_id
-            sch.get("route_id", f"RT_{sch['schedule_id']}"),      # 2. route_id
+            sched_id,                                   # 1. schedule_id
+            sch.get("route_id", f"RT_{sched_id}"),      # 2. route_id
             sch.get("line", "NR_LINE"),                           # 3. line
-            sch.get("policy_id", "RF001"),                        # 4. policy_id (已更新)
+            sch.get("policy_id", "RF001"),                        # 4. policy_id
             sch.get("service_type", "normal"),                    # 5. service_type
             sch.get("direction", "northbound"),                   # 6. direction
             sch.get("first_train_time", "06:00:00"),              # 7. departure_time
             sch.get("last_train_time", "23:00:00"),               # 8. arrival_time
             sch.get("origin_station_id"),                         # 9. origin_station_id
             sch.get("destination_station_id"),                    # 10. destination_station_id
-            stops_json,                                           # 11. stops_in_order
-            None,                                                 # 12. passed_through_stations
-            travel_time_json,                                     # 13. travel_time_offset
-            sch.get("base_fare_standard", sch.get("base_fare_economy")), # 14. base_fare_standard_usd
-            sch.get("per_stop_standard", sch.get("per_stop_economy")),   # 15. per_stop_standard_usd
-            sch.get("base_fare_first", sch.get("base_fare_business")),   # 16. base_fare_first_usd
-            sch.get("per_stop_first", sch.get("per_stop_business")),     # 17. per_stop_first_usd
-            sch.get("frequency_min"),                             # 18. frequency_min
-            operates_on_str,                                      # 19. operates_on
-            sch.get("overnight_flag", False)                      # 20. overnight_flag
+            sch.get("base_fare_standard", sch.get("base_fare_economy")), # 11. base_fare_standard_usd
+            sch.get("per_stop_standard", sch.get("per_stop_economy")),   # 12. per_stop_standard_usd
+            sch.get("base_fare_first", sch.get("base_fare_business")),   # 13. base_fare_first_usd
+            sch.get("per_stop_first", sch.get("per_stop_business")),     # 14. per_stop_first_usd
+            sch.get("frequency_min"),                             # 15. frequency_min
+            operates_on_str,                                      # 16. operates_on
+            sch.get("overnight_flag", False)                      # 17. overnight_flag
         ))
+        
+        # 2. Flatten JSON array and dictionary into rows for national rail stops
+        stops_list = sch.get("stops_in_order", [])
+        offsets_dict = sch.get("travel_time_from_origin_min", {})
+        
+        for idx, station_id in enumerate(stops_list, start=1):
+            offset = offsets_dict.get(station_id, 0)
+            stops_rows.append((
+                sched_id,
+                station_id,
+                idx,  # stop_order
+                offset,
+                False # is_pass_through defaults to False
+            ))
 
-    # 宣告 20 個欄位名稱
     columns = [
         "schedule_id", "route_id", "line", "policy_id", "service_type", 
         "direction", "departure_time", "arrival_time", "origin_station_id", "destination_station_id",
-        "stops_in_order", "passed_through_stations", "travel_time_offset",
         "base_fare_standard_usd", "per_stop_standard_usd",
         "base_fare_first_usd", "per_stop_first_usd", 
         "frequency_min", "operates_on", "overnight_flag"
     ]
-    
     n_sch = insert_many(cur, "schedules", columns, schedules_rows)
     print(f"  schedules: {n_sch} rows")
+    
+    stop_columns = ["schedule_id", "station_id", "stop_order", "travel_time_offset", "is_pass_through"]
+    n_stops = insert_many(cur, "national_rail_schedule_stops", stop_columns, stops_rows)
+    print(f"  national_rail_schedule_stops: {n_stops} rows")
     
     
 def seed_seat_layouts(cur):
     data = load("national_rail_seat_layouts.json")
-    
     coaches_rows = []
     seats_rows = []
     
     for layout in data:
         schedule_id = layout["schedule_id"]
         
-        # 1. 攤平車廂 (Coaches)
-        # 使用 enumerate 來產生車廂編號 (coach_number)，從 1 開始
         for c_idx, coach_data in enumerate(layout.get("coaches", []), start=1):
             coach_letter = coach_data["coach"]
             
-            # 自行組合一個全局唯一的 coach_id (例如: NR_SCH01_A)
+            # Generate a globally unique coach_id
             coach_id = f"{schedule_id}_{coach_letter}"
             
             coaches_rows.append((
                 coach_id,
                 schedule_id,
-                c_idx,                    # 對應 coach_number
+                c_idx,                    
                 coach_data["fare_class"]
             ))
             
-            # 2. 攤平座位 (Seats)
             for seat in coach_data.get("seats", []):
                 seat_id = seat["seat_id"]
                 
-                # 關鍵：組合出 bookings 認得的 seat_real_id
+                # Critical: Construct the unique seat_real_id recognized by bookings
                 seat_real_id = f"{schedule_id}_{coach_letter}_{seat_id}"
                 
                 seats_rows.append((
@@ -251,10 +263,9 @@ def seed_seat_layouts(cur):
                     seat_id,
                     seat["row"],
                     seat["column"],
-                    False # is_booked (預設為未訂位)
+                    False 
                 ))
 
-    # 寫入車廂表
     n_coaches = insert_many(
         cur, 
         "rail_coaches", 
@@ -263,7 +274,6 @@ def seed_seat_layouts(cur):
     )
     print(f"  rail_coaches: {n_coaches} rows")
     
-    # 寫入座位表
     n_seats = insert_many(
         cur, 
         "rail_seats", 
@@ -282,12 +292,12 @@ def seed_refund_policies(cur):
     for p in data:
         policy_id = p["policy_id"]
         
-        # 處理 service_type: 同學的 Schema 限制只能是 'normal' 或是 'express'
+        # Handle service_type validation against check constraints
         svc_type = p.get("applies_to", {}).get("service_type", "normal")
         if svc_type not in ["normal", "express"]:
             svc_type = "normal"
             
-        # 計算不可退票的分鐘數 (推算如果 refund_percent == 0 的最長視窗)
+        # Calculate no-refund minutes based on cancellation windows
         no_refund_min = 0
         for w in p.get("cancellation_windows", []):
             if w.get("refund_percent") == 0 and w.get("hours_before_departure_max"):
@@ -298,11 +308,11 @@ def seed_refund_policies(cur):
             svc_type,
             p["label"],
             no_refund_min,
-            None, # effective_from
-            None  # effective_until
+            None, 
+            None  
         ))
         
-        # 子表 1: 取消與退款視窗 (cancellation_windows)
+        # Child table 1: Cancellation and refund windows
         for idx, w in enumerate(p.get("cancellation_windows", []), start=1):
             windows_rows.append((
                 w["window_id"],
@@ -312,22 +322,21 @@ def seed_refund_policies(cur):
                 w.get("hours_before_departure_max"),
                 w["refund_percent"],
                 w.get("admin_fee_usd", 0.00),
-                idx # sort_order
+                idx 
             ))
         
-        # 子表 2: 延誤補償規則 (compensation_rules)
+        # Child table 2: Delay compensation rules
         for c in p.get("compensation_rules", []):
-            # 簡單判斷 JSON 內的延誤條件
             delay_min = 30 if "30" in c.get("condition", "") else (60 if "60" in c.get("condition", "") else 120)
             comp_pct = 50 if "50%" in c.get("compensation", "") else 100
             
             comp_rows.append((
                 c["rule_id"],
                 policy_id,
-                "delay", # trigger_type 限制
+                "delay", 
                 delay_min,
                 comp_pct,
-                "refund", # compensation_type 限制
+                "refund", 
                 c["condition"]
             ))
 
@@ -341,22 +350,18 @@ def seed_refund_policies(cur):
     print(f"  refund_compensation_rules: {n_comp} rows")
     
     
-
-
 def seed_users(cur):
     data = load("registered_users.json")
-    
     users_rows = []
     credentials_rows = []
     
-    # 初始化 Argon2id 密碼雜湊器
     ph = PasswordHasher()
     
     for u in data:
-        # 擷取 email 前半段作為 username
+        # Extract username from the prefix of email
         username = u["email"].split("@")[0]
         
-        # 1. 準備 users 表資料 (主表，完全不含密碼)
+        # 1. Prepare users table data (excluding sensitive credentials)
         users_rows.append((
             u["user_id"],
             username,
@@ -369,8 +374,8 @@ def seed_users(cur):
             u["is_active"]
         ))
         
-        # 2. 準備 user_credentials 表資料 (憑證表)
-        # 🔒 使用 Argon2id 自動加鹽並加密
+        # 2. Prepare user_credentials table data
+        # 🔒 Securely hash sensitive data using Argon2id with automatic salting
         pwd_hash = ph.hash(u["password"])
         ans_hash = ph.hash(u["secret_answer"])
         
@@ -380,7 +385,6 @@ def seed_users(cur):
             ans_hash
         ))
 
-    # 執行寫入主表
     n_users = insert_many(
         cur, 
         "users", 
@@ -389,7 +393,6 @@ def seed_users(cur):
     )
     print(f"  users: {n_users} rows")
     
-    # 執行寫入憑證表 (不需要 salt 欄位，Argon2id 已經把它包在 hash 裡了)
     n_creds = insert_many(
         cur, 
         "user_credentials", 
@@ -398,18 +401,18 @@ def seed_users(cur):
     )
     print(f"  user_credentials (Argon2id secured): {n_creds} rows")
 
+
 def seed_national_rail_bookings(cur):
     data = load("bookings.json")
     rows = []
     
     for b in data:
-        # 即使同學的表不存 coach 和 seat_id，我們依然可以用 JSON 裡的這兩個欄位
-        # 來幫忙組合出正確的 seat_real_id 寫入資料庫
+        # Construct seat_real_id even if standalone fields are omitted
         seat_real_id = b.get("seat_real_id")
         if not seat_real_id and "schedule_id" in b and "coach" in b and "seat_id" in b:
             seat_real_id = f"{b['schedule_id']}_{b['coach']}_{b['seat_id']}"
             
-        # 拿掉 b["coach"] 和 b["seat_id"]，對齊同學的 15 個欄位
+        # Align fields to match the 15-column schema structure
         rows.append((
             b["booking_id"],
             b["user_id"],
@@ -420,7 +423,7 @@ def seed_national_rail_bookings(cur):
             b["departure_time"],
             b["ticket_type"],
             b["fare_class"],
-            seat_real_id,             # 直接對應複合外鍵
+            seat_real_id,             
             b["stops_travelled"],
             b["amount_usd"],
             b["status"],
@@ -428,7 +431,7 @@ def seed_national_rail_bookings(cur):
             b.get("travelled_at")
         ))
 
-    # 100% 對齊 schema.sql 中實際存在的 15 個欄位
+    # 100% aligned with the 15 columns in schema.sql
     columns = [
         "booking_id", 
         "user_id", 
@@ -459,12 +462,12 @@ def seed_metro_travels(cur):
         rows.append((
             t["trip_id"],
             t["user_id"],
-            t.get("schedule_id"),         # JSON 裡叫 schedule_id，對接 schema 的 metro_schedule_id
+            t.get("schedule_id"),         
             t.get("origin_station_id"),
             t.get("destination_station_id"),
             t["travel_date"],
             t["ticket_type"],
-            t.get("day_pass_ref"),        # 購買一日票後的搭乘紀錄會用到
+            t.get("day_pass_ref"),        
             t.get("stops_travelled"),
             t["amount_usd"],
             t["status"],
@@ -472,7 +475,7 @@ def seed_metro_travels(cur):
             t.get("travelled_at")
         ))
 
-    # 完全對齊 schema.sql 中 metro_travel_history 的 13 個欄位
+    # Fully aligned with the 13 columns in metro_travel_history
     columns = [
         "trip_id", 
         "user_id", 
@@ -498,25 +501,24 @@ def seed_payments(cur):
     rows = []
     
     for p in data:
-        # 🛡️ 防禦地雷 1：過濾非 BK 開頭的 booking_id，避免違反外鍵約束
+        # 🛡️ Shield 1: Filter out non-BK booking IDs to prevent FK constraint violations
         b_id = p.get("booking_id")
         if b_id and not b_id.startswith("BK"):
-            b_id = None  # 讓地鐵的付款紀錄 booking_id 留空 (NULL)
+            b_id = None  
             
-        # 🛡️ 防禦地雷 2：補足 JSON 缺少的 NOT NULL 欄位 payment_type
+        # 🛡️ Shield 2: Supply missing NOT NULL field values
         payment_type = "purchase"
         
-        # 對齊 schema.sql 中 payments 表的 9 個欄位
         rows.append((
             p["payment_id"],
             b_id,
             p["amount_usd"],
-            payment_type,                # 補上的必填欄位
+            payment_type,                
             p["method"],
             p["status"],
             p.get("paid_at"),
-            None,                        # parent_payment_id (預設為空)
-            None                         # refunded_amount (預設為空)
+            None,                        
+            None                         
         ))
 
     columns = [
@@ -540,13 +542,12 @@ def seed_feedback(cur):
     rows = []
     
     for f in data:
-        # 🛡️ 防禦地雷 1：過濾非 BK 開頭的 booking_id，避免違反外鍵約束
+        # 🛡️ Shield 1: Filter out non-BK booking IDs to prevent FK constraint violations
         b_id = f.get("booking_id")
         if not b_id or not b_id.startswith("BK"):
-            # 如果是地鐵的評價或其他無效 ID，我們直接跳過不寫入
             continue 
             
-        # 🛡️ 防禦地雷 2：確保 rating 嚴格落在 1~5 之間，配合 CHECK 限制
+        # 🛡️ Shield 2: Enforce rating range between 1 and 5 to satisfy CHECK constraint
         rating = f.get("rating", 5)
         if rating < 1: rating = 1
         if rating > 5: rating = 5
@@ -583,17 +584,17 @@ def main():
 
     try:
         print("Seeding tables (dependency order):")
-        seed_metro_stations(cur)            #完成
-        seed_national_rail_stations(cur)    #完成
-        seed_refund_policies(cur)           #完成 
-        seed_metro_schedules(cur)           #完成
-        seed_national_rail_schedules(cur)   #完成
-        seed_seat_layouts(cur)              #完成
-        seed_users(cur)                     #完成
-        seed_national_rail_bookings(cur)    #完成
-        seed_metro_travels(cur)             #完成       
-        seed_payments(cur)                  #完成
-        seed_feedback(cur)                  #完成
+        seed_metro_stations(cur)            
+        seed_national_rail_stations(cur)    
+        seed_refund_policies(cur)            
+        seed_metro_schedules(cur)           
+        seed_national_rail_schedules(cur)   
+        seed_seat_layouts(cur)              
+        seed_users(cur)                     
+        seed_national_rail_bookings(cur)    
+        seed_metro_travels(cur)                    
+        seed_payments(cur)                  
+        seed_feedback(cur)                  
         conn.commit()
         print("\nAll done. Database seeded successfully.")
     except Exception as e:
