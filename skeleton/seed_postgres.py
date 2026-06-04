@@ -63,9 +63,9 @@ def seed_metro_stations(cur):
         stations_rows.append((
             s["station_id"],
             s["name"],
-            s.get("lines", []),  
+            ",".join(s.get("lines", [])),  
             s["is_interchange_metro"],
-            s.get("interchange_metro_lines", []), 
+            ",".join(s.get("interchange_metro_lines", [])), 
             s["is_interchange_national_rail"],
             s.get("interchange_national_rail_station_id")
         ))
@@ -96,9 +96,9 @@ def seed_national_rail_stations(cur):
         stations_rows.append((
             s["station_id"],
             s["name"],
-            s.get("lines", []),
+            ",".join(s.get("lines", [])),
             s["is_interchange_national_rail"],
-            s.get("interchange_national_rail_lines", []),
+            ",".join(s.get("interchange_national_rail_lines", [])),
             s["is_interchange_metro"],
             s.get("interchange_metro_station_id")
         ))
