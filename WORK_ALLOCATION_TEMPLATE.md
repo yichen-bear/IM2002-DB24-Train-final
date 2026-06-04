@@ -41,10 +41,10 @@ or reassigned mid-project).
 
 | Section | Primary Author | Supporting Member(s) | Notes |
 |---------|--------------|---------------------|-------|
-| Section 1 — ER Diagram | | | |
+| Section 1 — ER Diagram |呂怡柔 | | |
 | Section 2 — Normalisation Justification | | | |
-| Section 3 — Graph Database Design Rationale | | | |
-| Section 4 — Vector / RAG Design | | | |
+| Section 3 — Graph Database Design Rationale |呂怡柔 | | |
+| Section 4 — Vector / RAG Design |呂怡柔 | | |
 | Section 5 — AI Tool Usage Evidence | | | |
 | Section 6 — Reflection & Trade-offs | | | |
 | Section 7 — Optional Extension *(if applicable)* | | | |
@@ -60,7 +60,7 @@ All members must sum to 100%.
 |--------|-----------|---------------------|
 | 熊浥辰 | 33.3% | 主要負責`skeleton/seed_neo4j.py`、`skeleton/verify_neo4j.py`(輔助驗證`skeleton/seed_neo4j.py`)、`skeleton/ui.py`，協助`skeleton/agent.py`、`relational/queries.py`|
 | 邱鈺婷 | 33.3% | 主要負責`skeleton/seed_postgres.py`、`graph/queries.py`，協助`skeleton/agent.py`、`relational/queries.py`|
-| 呂怡柔 | 33.3% | 主要負責`relational/schema.sql`、`relational/queries.py`，協助agent測試，畫ERD|
+| 呂怡柔 | 33.3% | 主要負責`relational/schema.sql`、`relational/queries.py`，協助agent測試、Section 1 — ER Diagram、Section 3 — Graph Database Design Rationale、Section 4 — Vector / RAG Design|
 | **Total** | **100%** | |
 
 ---
