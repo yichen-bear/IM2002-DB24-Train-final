@@ -436,7 +436,7 @@ CREATE TABLE IF NOT EXISTS rail_coaches (
 
     FOREIGN KEY (schedule_id)
         REFERENCES schedules(schedule_id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT chk_coach_fare_class
         CHECK (fare_class IN ('standard', 'first'))
@@ -498,19 +498,24 @@ CREATE TABLE IF NOT EXISTS bookings (
     travelled_at            TIMESTAMP,
 
     FOREIGN KEY (user_id)
-        REFERENCES users(user_id),
+        REFERENCES users(user_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (schedule_id)
-        REFERENCES schedules(schedule_id),
+        REFERENCES schedules(schedule_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (origin_station_id)
-        REFERENCES national_rail_stations(station_id),
+        REFERENCES national_rail_stations(station_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (destination_station_id)
-        REFERENCES national_rail_stations(station_id),
+        REFERENCES national_rail_stations(station_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (seat_real_id)
-        REFERENCES rail_seats(seat_real_id),
+        REFERENCES rail_seats(seat_real_id)
+        ON DELETE RESTRICT,
 
     CONSTRAINT chk_booking_ticket_type
         CHECK (ticket_type IN ('single', 'return')),
@@ -558,16 +563,20 @@ CREATE TABLE IF NOT EXISTS metro_travel_history (
     travelled_at            TIMESTAMP,
 
     FOREIGN KEY (user_id)
-        REFERENCES users(user_id),
+        REFERENCES users(user_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (metro_schedule_id)
-        REFERENCES metro_schedules(metro_schedule_id),
+        REFERENCES metro_schedules(metro_schedule_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (origin_station_id)
-        REFERENCES metro_stations(station_id),
+        REFERENCES metro_stations(station_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (destination_station_id)
-        REFERENCES metro_stations(station_id),
+        REFERENCES metro_stations(station_id)
+        ON DELETE RESTRICT,
 
     CONSTRAINT chk_metro_hist_ticket_type
         CHECK (ticket_type IN ('single', 'day_pass')),
@@ -632,10 +641,12 @@ CREATE TABLE IF NOT EXISTS payments (
     refunded_amount   DECIMAL(10,2),
 
     FOREIGN KEY (booking_id)
-        REFERENCES bookings(booking_id),
+        REFERENCES bookings(booking_id)
+        ON DELETE RESTRICT,
 
     FOREIGN KEY (parent_payment_id)
-        REFERENCES payments(payment_id),
+        REFERENCES payments(payment_id)
+        ON DELETE SET NULL,
 
     CONSTRAINT chk_payment_amount
         CHECK (amount_usd > 0),
