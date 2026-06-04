@@ -37,6 +37,7 @@ def seed():
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     with driver.session() as session:
 
+        # 每次執行前清空現有圖資料 (安全重播)
         session.run("MATCH (n) DETACH DELETE n")
         print("  Cleared existing graph data")
 
@@ -45,15 +46,21 @@ def seed():
         for station in metro_stations:
             session.run(
                 """
-                CREATE (s:MetroStation {
-                    station_id: $station_id,
-                    name: $name,
-                    lines: $lines,
-                    is_interchange_metro: $is_interchange_metro,
-                    interchange_metro_lines: $interchange_metro_lines,
-                    is_interchange_national_rail: $is_interchange_national_rail,
-                    interchange_national_rail_station_id: $interchange_national_rail_station_id
-                })
+                MERGE (s:MetroStation {station_id: $station_id})
+                ON CREATE SET
+                    s.name = $name,
+                    s.lines = $lines,
+                    s.is_interchange_metro = $is_interchange_metro,
+                    s.interchange_metro_lines = $interchange_metro_lines,
+                    s.is_interchange_national_rail = $is_interchange_national_rail,
+                    s.interchange_national_rail_station_id = $interchange_national_rail_station_id
+                ON MATCH SET
+                    s.name = $name,
+                    s.lines = $lines,
+                    s.is_interchange_metro = $is_interchange_metro,
+                    s.interchange_metro_lines = $interchange_metro_lines,
+                    s.is_interchange_national_rail = $is_interchange_national_rail,
+                    s.interchange_national_rail_station_id = $interchange_national_rail_station_id
                 """,
                 station_id=station["station_id"],
                 name=station["name"],
@@ -69,15 +76,21 @@ def seed():
         for station in rail_stations:
             session.run(
                 """
-                CREATE (s:NationalRailStation {
-                    station_id: $station_id,
-                    name: $name,
-                    lines: $lines,
-                    is_interchange_national_rail: $is_interchange_national_rail,
-                    interchange_national_rail_lines: $interchange_national_rail_lines,
-                    is_interchange_metro: $is_interchange_metro,
-                    interchange_metro_station_id: $interchange_metro_station_id
-                })
+                MERGE (s:NationalRailStation {station_id: $station_id})
+                ON CREATE SET
+                    s.name = $name,
+                    s.lines = $lines,
+                    s.is_interchange_national_rail = $is_interchange_national_rail,
+                    s.interchange_rail_lines = $interchange_national_rail_lines,
+                    s.is_interchange_metro = $is_interchange_metro,
+                    s.interchange_metro_station_id = $interchange_metro_station_id
+                ON MATCH SET
+                    s.name = $name,
+                    s.lines = $lines,
+                    s.is_interchange_national_rail = $is_interchange_national_rail,
+                    s.interchange_rail_lines = $interchange_national_rail_lines,
+                    s.is_interchange_metro = $is_interchange_metro,
+                    s.interchange_metro_station_id = $interchange_metro_station_id
                 """,
                 station_id=station["station_id"],
                 name=station["name"],
@@ -88,7 +101,7 @@ def seed():
                 interchange_metro_station_id=station["interchange_metro_station_id"]
             )
 
-        # 3. 建立地鐵相鄰站點關係 (METRO_LINK)
+        # 3. 建立地鐵相鄰站點關係 (METRO_LINK) - 最佳化 MERGE 屬性賦值
         print("  Creating Metro adjacent links...")
         for station in metro_stations:
             for adj in station["adjacent_stations"]:
@@ -97,7 +110,11 @@ def seed():
                     MATCH (source:MetroStation {station_id: $source_id})
                     MATCH (target:MetroStation {station_id: $target_id})
                     MERGE (source)-[r:METRO_LINK {line: $line}]->(target)
-                    SET r.network_type = "metro",
+                    ON CREATE SET 
+                        r.network_type = "metro",
+                        r.travel_time_min = $travel_time_min
+                    ON MATCH SET 
+                        r.network_type = "metro",
                         r.travel_time_min = $travel_time_min
                     """,
                     source_id=station["station_id"],
@@ -106,7 +123,7 @@ def seed():
                     travel_time_min=int(adj["travel_time_min"])
                 )
 
-        # 4. 建立國鐵相鄰站點關係 (RAIL_LINK)
+        # 4. 建立國鐵相鄰站點關係 (RAIL_LINK) - 最佳化 MERGE 屬性賦值
         print("  Creating National Rail adjacent links...")
         for station in rail_stations:
             for adj in station["adjacent_stations"]:
@@ -115,7 +132,11 @@ def seed():
                     MATCH (source:NationalRailStation {station_id: $source_id})
                     MATCH (target:NationalRailStation {station_id: $target_id})
                     MERGE (source)-[r:RAIL_LINK {line: $line}]->(target)
-                    SET r.network_type = "national_rail",
+                    ON CREATE SET 
+                        r.network_type = "national_rail",
+                        r.travel_time_min = $travel_time_min
+                    ON MATCH SET 
+                        r.network_type = "national_rail",
                         r.travel_time_min = $travel_time_min
                     """,
                     source_id=station["station_id"],
