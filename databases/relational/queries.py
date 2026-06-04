@@ -448,6 +448,10 @@ def query_user_bookings(user_email: str) -> dict:
         
     user_id = profile["user_id"]
     
+    # 先在外部宣告空陣列，用來儲存查詢結果
+    nr_list = []
+    metro_list = []
+    
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # 2. Fetch the user's 'National Rail' booking history
@@ -476,18 +480,21 @@ def query_user_bookings(user_email: str) -> dict:
             )
             metro_list = [dict(r) for r in cur.fetchall()]
             
-            # 4. Foolproof: Convert all date and time fields to strings to prevent outer JSON parsing failures
-            from datetime import date, time  # 🟢 Ensure this line is added
-            for item in nr_list + metro_list:
-                for k, v in item.items():
-                    # 🟢 Ensure only datetime, date, time are in the parentheses (no .date)
-                    if isinstance(v, (datetime, date, time)):
-                        item[k] = str(v)
-                        
-            return {
-                "national_rail": nr_list,
-                "metro": metro_list
-            }
+    # ── 💡 修正關鍵：將 return 與資料轉換移到 with 區塊外面 ──
+    # 這樣可以確保 cursor 和 conn 在進入這個迴圈前就已經被 Python 的 with 語法確實 close() 釋放連線。
+            
+    # 4. Foolproof: Convert all date and time fields to strings to prevent outer JSON parsing failures
+    from datetime import date, time  # 🟢 Ensure this line is added
+    for item in nr_list + metro_list:
+        for k, v in item.items():
+            # 🟢 Ensure only datetime, date, time are in the parentheses (no .date)
+            if isinstance(v, (datetime, date, time)):
+                item[k] = str(v)
+                
+    return {
+        "national_rail": nr_list,
+        "metro": metro_list
+    }
             
             
 def query_payment_info(booking_id: str) -> Optional[dict]:

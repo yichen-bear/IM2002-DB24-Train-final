@@ -902,8 +902,6 @@ ON metro_access_logs(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_metro_history_user
 ON metro_travel_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_metro_logs_user ON metro_access_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_metro_history_user ON metro_travel_history(user_id);
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ------------------------------------------------------------
