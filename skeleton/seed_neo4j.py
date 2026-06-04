@@ -153,8 +153,8 @@ def seed():
                     """
                     MATCH (m:MetroStation {station_id: $metro_id})
                     MATCH (r:NationalRailStation {station_id: $rail_id})
-                    MERGE (m)-[:INTERCHANGE]->(r)
-                    MERGE (r)-[:INTERCHANGE]->(m)
+                    MERGE (m)-[:INTERCHANGE_TO]->(r)
+                    MERGE (r)-[:INTERCHANGE_TO]->(m)
                     """,
                     metro_id=station["station_id"],
                     rail_id=station["interchange_national_rail_station_id"]

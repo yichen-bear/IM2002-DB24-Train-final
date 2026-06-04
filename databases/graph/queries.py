@@ -75,7 +75,7 @@ def query_shortest_route(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE', 'travel_time_min')
+    CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
     YIELD path, weight
     RETURN path, weight AS total_time_min
     """
@@ -151,7 +151,7 @@ def query_cheapest_route(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE*]-(end))
+    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(end))
     RETURN path, length(path) AS total_hops
     """
     
@@ -231,7 +231,7 @@ def query_alternative_routes(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE*]-(end))
+    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(end))
     WHERE ALL(node IN nodes(path) WHERE node.station_id <> $avoid_station_id)
     RETURN path, length(path) AS total_hops
     """
@@ -307,8 +307,8 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE*]-(end))
-    WHERE any(rel IN relationships(path) WHERE type(rel) = 'INTERCHANGE')
+    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(end))
+    WHERE any(rel IN relationships(path) WHERE type(rel) = 'INTERCHANGE_TO')
     RETURN path, 
            length(path) AS total_hops,
            reduce(s = 0, r IN relationships(path) | s + coalesce(r.travel_time_min, 0)) AS total_time_min
@@ -347,7 +347,7 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                     "travel_time_min": rel.get("travel_time_min", 0)
                 })
                 # Log and map the coordinates where network transfers happen
-                if rel_type == 'INTERCHANGE':
+                if rel_type == 'INTERCHANGE_TO':
                     interchange_points.append({
                         "from_station": rel.start_node.get("station_id"),
                         "to_station": rel.end_node.get("station_id")
@@ -385,7 +385,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     # Use the *1..$hops syntax to discover neighboring nodes within N steps from the source disruption
     cypher_query = """
     MATCH (disrupted {station_id: $delayed_station_id})
-    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE*1..$hops]-(affected)
+    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..$hops]-(affected)
     WHERE disrupted <> affected
     RETURN DISTINCT affected.station_id AS station_id,
                     affected.name AS name,
