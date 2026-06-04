@@ -94,76 +94,91 @@ def example_query() -> dict:
 # ── NATIONAL RAIL AVAILABILITY ────────────────────────────────────────────────
 
 def query_national_rail_availability(
-    origin_station_id: str,
-    destination_station_id: str,
-    travel_date: date,
+    origin_id: str = None,
+    destination_id: str = None,
+    travel_date: Optional[str] = None,
+    **kwargs
 ) -> list[dict]:
     """
-    Find available National Rail schedules between origin and destination on a given date.
-    
+    Return national rail schedules that serve both origin and destination stations
+    in the correct order, along with seat occupancy for the requested travel date.
+
     Uses INNER JOINs on the normalized national_rail_schedule_stops table to ensure 
     the train services both stations in the correct sequential stop order.
     """
-    # Convert Python date object to integer day of week index (0=Monday, ..., 6=Sunday)
-    day_idx = travel_date.weekday()
-    days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    day_name = days_map[day_idx]
-
-    sql = """
-        SELECT 
-            s.schedule_id,
-            s.route_id,
-            s.line,
-            s.policy_id,
-            s.service_type,
-            s.direction,
-            s.departure_time,
-            s.arrival_time,
-            s.base_fare_standard_usd,
-            s.per_stop_standard_usd,
-            s.base_fare_first_usd,
-            s.per_stop_first_usd,
-            s.frequency_min,
-            s.overnight_flag,
-            -- Calculate the total sequence stops travelled between origin and destination
-            (st_dest.stop_order - st_orig.stop_order) AS stops_travelled
-        FROM schedules s
-        INNER JOIN national_rail_schedule_stops st_orig 
-            ON s.schedule_id = st_orig.schedule_id
-        INNER JOIN national_rail_schedule_stops st_dest 
-            ON s.schedule_id = st_dest.schedule_id
-        WHERE st_orig.station_id = %s
-          AND st_dest.station_id = %s
-          AND st_orig.stop_order < st_dest.stop_order  -- Enforce correct forward travel sequence
-          AND s.operates_on LIKE %s                    -- Verify scheduling operation days
-        ORDER BY s.departure_time ASC;
-    """
+    # Adapt to AI's arbitrary parameter renaming (from_id / to_id)
+    origin_id = origin_id or kwargs.get("from_id")
+    destination_id = destination_id or kwargs.get("to_id")
     
-    like_pattern = f"%{day_name}%"
+    if not origin_id or not destination_id:
+        return []
+
+    # Parse travel_date string to extract day of week name (Mon, Tue, etc.)
+    day_name = ""
+    if travel_date:
+        try:
+            dt_obj = datetime.strptime(travel_date, "%Y-%m-%d").date()
+            days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            day_name = days_map[dt_obj.weekday()]
+        except ValueError:
+            pass
+
+    results = []
     
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, (origin_station_id, destination_station_id, like_pattern))
-            results = cur.fetchall()
-            
-            # Formulate returning dictionaries safely matching application requirements
-            output = []
-            for row in results:
-                d = dict(row)
-                # Ensure time fields are converted to readable HH:MM:SS format strings
-                if isinstance(d.get("departure_time"), (time, datetime)):
-                    d["departure_time"] = d["departure_time"].strftime("%H:%M:%S")
-                if isinstance(d.get("arrival_time"), (time, datetime)):
-                    d["arrival_time"] = d["arrival_time"].strftime("%H:%M:%S")
-                # Ensure accurate numeric parsing for monetary values
-                d["base_fare_standard_usd"] = float(d["base_fare_standard_usd"])
-                d["per_stop_standard_usd"] = float(d["per_stop_standard_usd"])
-                d["base_fare_first_usd"] = float(d["base_fare_first_usd"])
-                d["per_stop_first_usd"] = float(d["per_stop_first_usd"])
-                output.append(d)
-                
-            return output
+            # Query utilizing dynamic SQL Joins to enforce strict 1NF routing lookup
+            sql = """
+                SELECT 
+                    s.schedule_id, s.route_id, s.line, s.policy_id, s.service_type, s.direction,
+                    s.departure_time, s.arrival_time, s.origin_station_id, s.destination_station_id,
+                    s.base_fare_standard_usd, s.per_stop_standard_usd,
+                    s.base_fare_first_usd, s.per_stop_first_usd,
+                    (st_dest.stop_order - st_orig.stop_order) AS stops_travelled
+                FROM schedules s
+                INNER JOIN national_rail_schedule_stops st_orig ON s.schedule_id = st_orig.schedule_id
+                INNER JOIN national_rail_schedule_stops st_dest ON s.schedule_id = st_dest.schedule_id
+                WHERE st_orig.station_id = %s
+                  AND st_dest.station_id = %s
+                  AND st_orig.stop_order < st_dest.stop_order;
+            """
+            cur.execute(sql, (origin_id, destination_id))
+            schedules = cur.fetchall()
 
+            for sch in schedules:
+                sch_dict = dict(sch)
+                
+                # Check calendar operation constraints if operates_on filter matches day_name
+                if day_name:
+                    cur.execute("SELECT operates_on FROM schedules WHERE schedule_id = %s;", (sch["schedule_id"],))
+                    op_row = cur.fetchone()
+                    if op_row and day_name not in op_row["operates_on"]:
+                        continue # Skip if train does not run on this day of the week
+
+                # Query the number of booked seats for a specific date
+                occupied_seats = 0
+                if travel_date:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*) FROM bookings 
+                        WHERE schedule_id = %s AND travel_date = %s AND status = 'confirmed';
+                        """,
+                        (sch["schedule_id"], travel_date)
+                    )
+                    occupied_seats = cur.fetchone()["count"]
+                
+                sch_dict["occupied_seats"] = occupied_seats
+                
+                # Format time types into clear serializable strings safely
+                if isinstance(sch_dict.get("departure_time"), (time, datetime)):
+                    sch_dict["departure_time"] = sch_dict["departure_time"].strftime("%H:%M:%S")
+                if isinstance(sch_dict.get("arrival_time"), (time, datetime)):
+                    sch_dict["arrival_time"] = sch_dict["arrival_time"].strftime("%H:%M:%S")
+                    
+                results.append(sch_dict)
+                        
+    results.sort(key=lambda x: x["departure_time"] if x["departure_time"] else "")
+    return results
 
 def query_national_rail_fare(
     schedule_id: str,
@@ -228,57 +243,43 @@ def query_national_rail_fare(
 
 # ── METRO SCHEDULES & FARE ────────────────────────────────────────────────────
 
-def query_metro_schedules(
-    origin_station_id: str,
-    destination_station_id: str,
-) -> list[dict]:
+def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
     """
-    Retrieve active metro schedules between two target stations.
+    Return metro schedules that serve both origin and destination in the correct order.
     
     Joins the master metro_schedules table with the normalized metro_schedule_stops 
     sequence layout table to identify valid lines and compute stops_travelled.
     """
-    sql = """
-        SELECT 
-            ms.metro_schedule_id,
-            ms.line,
-            ms.direction,
-            ms.first_train_time,
-            ms.last_train_time,
-            ms.frequency_min,
-            ms.base_fare_usd,
-            ms.per_stop_rate_usd,
-            ms.operates_on,
-            -- Calculate number of transit links between selected stations
-            (m_dest.stop_order - m_orig.stop_order) AS stops_travelled
-        FROM metro_schedules ms
-        INNER JOIN metro_schedule_stops m_orig 
-            ON ms.metro_schedule_id = m_orig.metro_schedule_id
-        INNER JOIN metro_schedule_stops m_dest 
-            ON ms.metro_schedule_id = m_dest.metro_schedule_id
-        WHERE m_orig.station_id = %s
-          AND m_dest.station_id = %s
-          AND m_orig.stop_order < m_dest.stop_order  -- Enforce directional travel sequence
-        ORDER BY ms.first_train_time ASC;
-    """
+    results = []
     
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, (origin_station_id, destination_station_id))
-            results = cur.fetchall()
+            sql = """
+                SELECT 
+                    ms.metro_schedule_id, ms.line, ms.direction, ms.origin_station_id, ms.destination_station_id,
+                    ms.first_train_time, ms.last_train_time, ms.frequency_min,
+                    ms.base_fare_usd, ms.per_stop_rate_usd, ms.operates_on,
+                    (m_dest.stop_order - m_orig.stop_order) AS stops_travelled
+                FROM metro_schedules ms
+                INNER JOIN metro_schedule_stops m_orig ON ms.metro_schedule_id = m_orig.metro_schedule_id
+                INNER JOIN metro_schedule_stops m_dest ON ms.metro_schedule_id = m_dest.metro_schedule_id
+                WHERE m_orig.station_id = %s
+                  AND m_dest.station_id = %s
+                  AND m_orig.stop_order < m_dest.stop_order;
+            """
+            cur.execute(sql, (origin_id, destination_id))
+            schedules = cur.fetchall()
             
-            output = []
-            for row in results:
-                d = dict(row)
-                if isinstance(d.get("first_train_time"), (time, datetime)):
-                    d["first_train_time"] = d["first_train_time"].strftime("%H:%M:%S")
-                if isinstance(d.get("last_train_time"), (time, datetime)):
-                    d["last_train_time"] = d["last_train_time"].strftime("%H:%M:%S")
-                d["base_fare_usd"] = float(d["base_fare_usd"])
-                d["per_stop_rate_usd"] = float(d["per_stop_rate_usd"])
-                output.append(d)
-                
-            return output
+            for sch in schedules:
+                sch_dict = dict(sch)
+                if isinstance(sch_dict.get("first_train_time"), (time, datetime)):
+                    sch_dict["first_train_time"] = sch_dict["first_train_time"].strftime("%H:%M:%S")
+                if isinstance(sch_dict.get("last_train_time"), (time, datetime)):
+                    sch_dict["last_train_time"] = sch_dict["last_train_time"].strftime("%H:%M:%S")
+                results.append(sch_dict)
+                        
+    return results
+
 
 def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
     """
@@ -533,93 +534,85 @@ def execute_booking(
     ticket_type: str = "single",
 ) -> tuple[bool, dict | str]:
     """
-    Create a national rail booking for a logged-in user.
-
-    Args:
-        user_id (str): The ID of the user making the booking.
-        schedule_id (str): The ID of the train schedule.
-        origin_station_id (str): The departure station ID.
-        destination_station_id (str): The arrival station ID.
-        travel_date (str): The date of travel (YYYY-MM-DD).
-        fare_class (str): The selected fare class (e.g., 'standard', 'first').
-        seat_id (str): The preferred seat short code, or 'any' for auto-selection.
-        ticket_type (str, optional): The type of ticket ('single' or 'return'). Defaults to "single".
-
-    Returns:
-        tuple[bool, dict | str]: A boolean indicating success or failure, and a dictionary of booking details or an error message string.
+    Create a national rail booking for a logged-in user inside an atomic transaction.
+    
+    Verifies routing from the normalized junction table, calculates dynamic fare, 
+    applies a pessimistic lock on the seat, and commits both booking and payment.
     """
-    # 1. Verify station sequence and calculate the number of stops travelled (stops_travelled)
+    # 1. Verify station sequence and calculate stops_travelled using normalized junction table
     with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT stops_in_order, departure_time FROM schedules WHERE schedule_id = %s;", (schedule_id,))
-            res = cur.fetchone()
-            if not res or not res[0]:
-                return False, "Schedule not found"
-            raw_stops = res[0]
-            if isinstance(raw_stops, str) and raw_stops.strip().startswith("["):
-                import json
-                stops = json.loads(raw_stops)
-            else:
-                stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
-            if origin_station_id not in stops or destination_station_id not in stops:
-                return False, "Invalid origin or destination for this schedule"
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            sql_route = """
+                SELECT 
+                    s.departure_time,
+                    st_orig.stop_order AS orig_order,
+                    st_dest.stop_order AS dest_order
+                FROM schedules s
+                INNER JOIN national_rail_schedule_stops st_orig ON s.schedule_id = st_orig.schedule_id
+                INNER JOIN national_rail_schedule_stops st_dest ON s.schedule_id = st_dest.schedule_id
+                WHERE s.schedule_id = %s 
+                  AND st_orig.station_id = %s 
+                  AND st_dest.station_id = %s;
+            """
+            cur.execute(sql_route, (schedule_id, origin_station_id, destination_station_id))
+            route_res = cur.fetchone()
             
-            orig_idx = stops.index(origin_station_id)
-            dest_idx = stops.index(destination_station_id)
-            if orig_idx >= dest_idx:
-                return False, "Incorrect station sequence ordering"
+            if not route_res:
+                return False, "Invalid origin or destination station for this schedule layout"
+                
+            orig_order = route_res["orig_order"]
+            dest_order = route_res["dest_order"]
             
-            stops_travelled = dest_idx - orig_idx
-            default_dep_time = res[1]
+            if orig_order >= dest_order:
+                return False, "Incorrect station sequence ordering for forward travel"
+                
+            stops_travelled = dest_order - orig_order
+            default_dep_time = route_res["departure_time"]
 
-    # 2. Calculate total fare (if return ticket ticket_type == "return", multiply amount by two)
+    # 2. Compute financial fare totals accurately
     fare_info = query_national_rail_fare(schedule_id, fare_class, stops_travelled)
-    stops_travelled = int(stops_travelled)
     if not fare_info:
-        return False, "Failed to calculate fare"
+        return False, "Failed to calculate travel fare parameters"
+        
     amount_usd = fare_info["total_fare_usd"]
     if ticket_type == "return":
         amount_usd *= 2
 
-    # 3. Check seat availability and obtain seat_real_id
+    # 3. Assess seat inventory allocation
     avail_seats = query_available_seats(schedule_id, travel_date, fare_class)
     if not avail_seats:
-        return False, "No seats available in this class"
+        return False, "No active seats available in this carriage class"
 
     selected_real_id = None
     selected_short_id = None
     
-    # If "any" is specified, call auto seat selection
     if seat_id == "any":
         auto_shorts = auto_select_adjacent_seats(avail_seats, 1)
         if not auto_shorts:
-            return False, "Auto seat assignment failed"
+            return False, "Automatic seat assignment failed"
         selected_short_id = auto_shorts[0]
     else:
         selected_short_id = seat_id
 
-    # Match the real database primary key ID (seat_real_id) from the available list
     for s in avail_seats:
         if s["seat_id"] == selected_short_id:
             selected_real_id = s["seat_real_id"]
             break
             
     if not selected_real_id:
-        return False, f"Seat {selected_short_id} is unavailable or already occupied"
+        return False, f"Requested seat {selected_short_id} is unavailable or occupied"
 
-    # 4. Start executing manual transaction control (Pessimistic locking to prevent race conditions)
+    # 4. Open atomic manual transaction block to preserve data integrity
     booking_id = _gen_booking_id()
     payment_id = _gen_payment_id()
     now = datetime.now(timezone.utc)
 
-    # Open a completely new connection without auto-commit
     conn = psycopg2.connect(PG_DSN)
-    conn.autocommit = False
+    conn.autocommit = False  # Enforce transaction boundaries explicitly
     
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # [Core Lock] Use FOR UPDATE NOWAIT to lock this seat for the specific schedule and date
-            # If another transaction is processing this seat, it will immediately throw an error and jump to except, preventing double booking
+            # [CRITICAL LOCKING] Apply FOR UPDATE to guarantee linearizability and prevent race conditions
             cur.execute(
                 """
                 SELECT 1 FROM bookings 
@@ -630,9 +623,9 @@ def execute_booking(
             )
             if cur.fetchone():
                 conn.rollback()
-                return False, "Seat was just booked by another session"
+                return False, "Seat transaction collision: already booked by another active session"
 
-            # Insert into bookings table
+            # Insert atomic booking metadata record
             sql_ins_booking = """
                 INSERT INTO bookings (
                     booking_id, user_id, schedule_id, origin_station_id, destination_station_id,
@@ -646,7 +639,7 @@ def execute_booking(
                 stops_travelled, amount_usd, "confirmed", now
             ))
 
-            # Insert into payments table
+            # Insert atomic matching payment ledger entity with strict column mapping lists
             sql_ins_payment = """
                 INSERT INTO payments (
                     payment_id, booking_id, amount_usd, payment_type, method, status, paid_at
@@ -656,7 +649,7 @@ def execute_booking(
                 payment_id, booking_id, amount_usd, "purchase", "credit_card", "paid", now
             ))
 
-            # Commit to the database only if everything succeeds
+            # Unified commit confirming the entire business transaction workflow simultaneously
             conn.commit()
             
             return True, {
@@ -668,33 +661,23 @@ def execute_booking(
             }
             
     except Exception as e:
-        # Rollback everything if any step fails in between
-        conn.rollback()
-        return False, f"Booking transaction rolled back: {str(e)}"
+        conn.rollback()  # Safely abort transaction, preventing orphaned bookings/payments leaks
+        return False, f"Booking transaction rolled back successfully: {str(e)}"
     finally:
         conn.close()
-
+        
+        
 def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]:
     """
-    Cancel a national rail booking and calculate the refund amount based on 
-    the service type and refund policies (RF001 / RF002).
-
-    Args:
-        booking_id (str): The ID of the booking to be cancelled.
-        user_id (str): The ID of the user requesting the cancellation.
-
-    Returns:
-        tuple[bool, dict | str]: A boolean indicating success or failure, and a dictionary with cancellation details or an error message string.
+    Cancel an active booking record safely, issuing an isolated payment refund structure.
     """
     now = datetime.now(timezone.utc)
-    
-    # Open manual transaction control to prevent Race Condition during cancellation
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = False
     
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1. Lock and fetch this booking, while checking if it belongs to the user and its status must be 'confirmed'
+            # Pessimistic locking of booking record targeting individual cancellation flows
             cur.execute(
                 """
                 SELECT b.*, s.service_type 
@@ -709,47 +692,35 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             
             if not booking:
                 conn.rollback()
-                return False, "找不到對應的有效訂單，或您無權操作此訂單。"
+                return False, "Target booking identifier not found or authorization denied"
                 
             if booking["status"] == "cancelled":
                 conn.rollback()
-                return False, "該訂單先前已經取消過了。"
+                return False, "Target booking transaction has already been processed as cancelled"
 
-            # 2. Calculate time remaining until departure (simple estimation: combining travel_date and departure_time from DB)
-            # For simplicity, we use a flexible refund strategy here (actual projects can calculate based on timestamps)
             service_type = booking["service_type"] or "normal"
             amount_usd = float(booking["amount_usd"])
             
-            # 3. Determine the refund rate based on the policy (RF001/RF002)
-            # Implement standard tiered refund logic here
-            refund_rate = 1.0  # Default full refund
-            policy_note = "RF001: 提前取消，符合 100% 全額退款金額。"
+            # Policy rules assignment (RF001/RF002 compliance execution matching rules)
+            refund_rate = 1.0
+            policy_note = "RF001: Standard advance cancellation policy applied at 100% face value."
             
             if service_type.lower() == "express":
-                # Express train policy (RF002)
-                policy_note = "RF002: 特快車次取消，扣除手續費後退款。"
-                refund_rate = 0.8  # Example: Express train charges a 20% handling fee
-            else:
-                # Normal train policy (RF001)
-                refund_rate = 1.0
+                policy_note = "RF002: Express route policy applied; 20% administrative retention fee applied."
+                refund_rate = 0.8
 
             refund_amount = amount_usd * refund_rate
 
-            # 4. Update booking status to cancelled
-            cur.execute(
-                "UPDATE bookings SET status = 'cancelled' WHERE booking_id = %s;",
-                (booking_id,)
-            )
+            # Update master execution token state mapping
+            cur.execute("UPDATE bookings SET status = 'cancelled' WHERE booking_id = %s;", (booking_id,))
 
-            # 5. Insert refund record into payments table (payment_type marked as refund)
+            # Seed financial balancing tracking ledger items cleanly mapping columns
             payment_id = _gen_payment_id()
-            cur.execute(
-                """
+            sql_refund = """
                 INSERT INTO payments (payment_id, booking_id, amount_usd, payment_type, method, status, paid_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s);
-                """,
-                (payment_id, booking_id, refund_amount, "refund", "credit_card", "refunded", now)
-            )
+            """
+            cur.execute(sql_refund, (payment_id, booking_id, refund_amount, "refund", "credit_card", "refunded", now))
 
             conn.commit()
             return True, {
@@ -761,9 +732,10 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
     except Exception as e:
         conn.rollback()
-        return False, f"取消訂單交易失敗，已回滾：{str(e)}"
+        return False, f"Cancellation protocol aborted: {str(e)}"
     finally:
         conn.close()
+        
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
 
