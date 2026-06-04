@@ -94,89 +94,75 @@ def example_query() -> dict:
 # ── NATIONAL RAIL AVAILABILITY ────────────────────────────────────────────────
 
 def query_national_rail_availability(
-    origin_id: str = None,
-    destination_id: str = None,
-    travel_date: Optional[str] = None,
-    **kwargs
+    origin_station_id: str,
+    destination_station_id: str,
+    travel_date: date,
 ) -> list[dict]:
     """
-    Return national rail schedules that serve both origin and destination stations
-    in the correct order, along with seat occupancy for the requested travel date.
-
-    Args:
-        origin_id (str, optional): The ID of the departure station.
-        destination_id (str, optional): The ID of the arrival station.
-        travel_date (str, optional): The requested date of travel (YYYY-MM-DD).
-        **kwargs: Additional arguments to catch unexpected parameters from AI.
-
-    Returns:
-        list[dict]: A list of dictionaries containing available schedules and details.
-    """
-    # Shield 1: Foolproof! Automatically adapt to AI's arbitrary parameter renaming (from_id / to_id)
-    origin_id = origin_id or kwargs.get("from_id")
-    destination_id = destination_id or kwargs.get("to_id")
+    Find available National Rail schedules between origin and destination on a given date.
     
-    # If mandatory parameters are still missing after adaptation, safely return an empty array to prevent database crashes
-    if not origin_id or not destination_id:
-        return []
+    Uses INNER JOINs on the normalized national_rail_schedule_stops table to ensure 
+    the train services both stations in the correct sequential stop order.
+    """
+    # Convert Python date object to integer day of week index (0=Monday, ..., 6=Sunday)
+    day_idx = travel_date.weekday()
+    days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    day_name = days_map[day_idx]
 
-    results = []
+    sql = """
+        SELECT 
+            s.schedule_id,
+            s.route_id,
+            s.line,
+            s.policy_id,
+            s.service_type,
+            s.direction,
+            s.departure_time,
+            s.arrival_time,
+            s.base_fare_standard_usd,
+            s.per_stop_standard_usd,
+            s.base_fare_first_usd,
+            s.per_stop_first_usd,
+            s.frequency_min,
+            s.overnight_flag,
+            -- Calculate the total sequence stops travelled between origin and destination
+            (st_dest.stop_order - st_orig.stop_order) AS stops_travelled
+        FROM schedules s
+        INNER JOIN national_rail_schedule_stops st_orig 
+            ON s.schedule_id = st_orig.schedule_id
+        INNER JOIN national_rail_schedule_stops st_dest 
+            ON s.schedule_id = st_dest.schedule_id
+        WHERE st_orig.station_id = %s
+          AND st_dest.station_id = %s
+          AND st_orig.stop_order < st_dest.stop_order  -- Enforce correct forward travel sequence
+          AND s.operates_on LIKE %s                    -- Verify scheduling operation days
+        ORDER BY s.departure_time ASC;
+    """
+    
+    like_pattern = f"%{day_name}%"
     
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            sql = """
-                SELECT schedule_id, route_id, line, policy_id, service_type, direction,
-                       departure_time, arrival_time, origin_station_id, destination_station_id,
-                       stops_in_order, base_fare_standard_usd, per_stop_standard_usd,
-                       base_fare_first_usd, per_stop_first_usd
-                FROM schedules;
-            """
-            cur.execute(sql)
-            schedules = cur.fetchall()
-
-            for sch in schedules:
-                raw_stops = sch.get("stops_in_order") or ""
+            cur.execute(sql, (origin_station_id, destination_station_id, like_pattern))
+            results = cur.fetchall()
+            
+            # Formulate returning dictionaries safely matching application requirements
+            output = []
+            for row in results:
+                d = dict(row)
+                # Ensure time fields are converted to readable HH:MM:SS format strings
+                if isinstance(d.get("departure_time"), (time, datetime)):
+                    d["departure_time"] = d["departure_time"].strftime("%H:%M:%S")
+                if isinstance(d.get("arrival_time"), (time, datetime)):
+                    d["arrival_time"] = d["arrival_time"].strftime("%H:%M:%S")
+                # Ensure accurate numeric parsing for monetary values
+                d["base_fare_standard_usd"] = float(d["base_fare_standard_usd"])
+                d["per_stop_standard_usd"] = float(d["per_stop_standard_usd"])
+                d["base_fare_first_usd"] = float(d["base_fare_first_usd"])
+                d["per_stop_first_usd"] = float(d["per_stop_first_usd"])
+                output.append(d)
                 
-                # Shield 2: Smart JSON/string parser to resolve filtering issues with brackets and quotes
-                if isinstance(raw_stops, list):
-                    stops = raw_stops
-                elif isinstance(raw_stops, str):
-                    raw_stops = raw_stops.strip()
-                    if raw_stops.startswith("["):
-                        stops = json.loads(raw_stops)
-                    else:
-                        stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
-                else:
-                    stops = []
-                
-                # Check if both origin and destination stations are in the stops list
-                if origin_id in stops and destination_id in stops:
-                    orig_idx = stops.index(origin_id)
-                    dest_idx = stops.index(destination_id)
-                    
-                    # Ensure the travel direction is correct (origin comes before destination)
-                    if orig_idx < dest_idx:
-                        sch_dict = dict(sch)
-                        
-                        # Query the number of booked seats for a specific date
-                        occupied_seats = 0
-                        if travel_date:
-                            cur.execute(
-                                """
-                                SELECT COUNT(*) FROM bookings 
-                                WHERE schedule_id = %s AND travel_date = %s AND status = 'confirmed';
-                                """,
-                                (sch["schedule_id"], travel_date)
-                            )
-                            occupied_seats = cur.fetchone()["count"]
-                        
-                        sch_dict["occupied_seats"] = occupied_seats
-                        sch_dict["stops_travelled"] = dest_idx - orig_idx
-                        results.append(sch_dict)
-                        
-    # Sort by departure time
-    results.sort(key=lambda x: x["departure_time"] if x["departure_time"] else "")
-    return results
+            return output
 
 
 def query_national_rail_fare(
@@ -242,58 +228,57 @@ def query_national_rail_fare(
 
 # ── METRO SCHEDULES & FARE ────────────────────────────────────────────────────
 
-def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
+def query_metro_schedules(
+    origin_station_id: str,
+    destination_station_id: str,
+) -> list[dict]:
     """
-    Return metro schedules that serve both origin and destination in the correct order.
-
-    Args:
-        origin_id (str): The ID of the departure metro station.
-        destination_id (str): The ID of the arrival metro station.
-
-    Returns:
-        list[dict]: A list of dictionaries representing available metro schedules.
+    Retrieve active metro schedules between two target stations.
+    
+    Joins the master metro_schedules table with the normalized metro_schedule_stops 
+    sequence layout table to identify valid lines and compute stops_travelled.
     """
-    results = []
+    sql = """
+        SELECT 
+            ms.metro_schedule_id,
+            ms.line,
+            ms.direction,
+            ms.first_train_time,
+            ms.last_train_time,
+            ms.frequency_min,
+            ms.base_fare_usd,
+            ms.per_stop_rate_usd,
+            ms.operates_on,
+            -- Calculate number of transit links between selected stations
+            (m_dest.stop_order - m_orig.stop_order) AS stops_travelled
+        FROM metro_schedules ms
+        INNER JOIN metro_schedule_stops m_orig 
+            ON ms.metro_schedule_id = m_orig.metro_schedule_id
+        INNER JOIN metro_schedule_stops m_dest 
+            ON ms.metro_schedule_id = m_dest.metro_schedule_id
+        WHERE m_orig.station_id = %s
+          AND m_dest.station_id = %s
+          AND m_orig.stop_order < m_dest.stop_order  -- Enforce directional travel sequence
+        ORDER BY ms.first_train_time ASC;
+    """
     
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT metro_schedule_id, line, direction, origin_station_id, destination_station_id,
-                       first_train_time, last_train_time, frequency_min, stops_in_order,
-                       base_fare_usd, per_stop_rate_usd, operates_on
-                FROM metro_schedules;
-                """
-            )
-            schedules = cur.fetchall()
+            cur.execute(sql, (origin_station_id, destination_station_id))
+            results = cur.fetchall()
             
-            for sch in schedules:
-                raw_stops = sch.get("stops_in_order") or ""
+            output = []
+            for row in results:
+                d = dict(row)
+                if isinstance(d.get("first_train_time"), (time, datetime)):
+                    d["first_train_time"] = d["first_train_time"].strftime("%H:%M:%S")
+                if isinstance(d.get("last_train_time"), (time, datetime)):
+                    d["last_train_time"] = d["last_train_time"].strftime("%H:%M:%S")
+                d["base_fare_usd"] = float(d["base_fare_usd"])
+                d["per_stop_rate_usd"] = float(d["per_stop_rate_usd"])
+                output.append(d)
                 
-                # Enhanced parsing logic
-                if isinstance(raw_stops, list):
-                    stops = raw_stops
-                elif isinstance(raw_stops, str):
-                    raw_stops = raw_stops.strip()
-                    if raw_stops.startswith("["):
-                        import json
-                        stops = json.loads(raw_stops)
-                    else:
-                        stops = [s.strip() for s in raw_stops.split(",") if s.strip()]
-                else:
-                    stops = []
-                
-                if origin_id in stops and destination_id in stops:
-                    orig_idx = stops.index(origin_id)
-                    dest_idx = stops.index(destination_id)
-                    
-                    if orig_idx < dest_idx:
-                        sch_dict = dict(sch)
-                        sch_dict["stops_travelled"] = dest_idx - orig_idx
-                        results.append(sch_dict)
-                        
-    return results
-
+            return output
 
 def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
     """
