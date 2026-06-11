@@ -5,7 +5,7 @@ This section documents the structured collaboration with AI tools during the gra
 ---
 
 ### Example 1: Graph Modeling and Label Partitioning Decision
-* **Context**: Designing the Neo4j graph database schema in `seed_neo4j.py` to support multi-modal transit routing. The challenge was deciding whether to represent all stations under a single generic label or partition them into distinct networks.
+* **Context**: Designing the Neo4j graph database schema in `seed_neo4j.py` to support multi-modal transit routing. The challenge was deciding whether to represent all stations under a single generic label or partition them into distinct networks, which directly impacts how polymorphic station associations from the relational schema (`station_adjacencies`) are mapped.
 * **Prompt**:
   ```text
   We are seeding a Neo4j database from two JSON files containing station records: metro stations and national rail stations. Should we label all stations with a single (:Station) label, or separate labels like (:MetroStation) and (:NationalRailStation)? How should we model the connection edges between them to enable efficient routing search?
@@ -33,13 +33,3 @@ This section documents the structured collaboration with AI tools during the gra
   Write a Python script that connects to Neo4j and validates that the number of MetroStation and NationalRailStation nodes matches the count of items in metro_stations.json and national_rail_stations.json, and counts the relationship edges to make sure they correspond to the number of adjacencies.
   ```
 * **Outcome**: The AI generated a script template using the Neo4j Python driver. It loads the JSON payloads into memory, queries node labels, computes expected edge counts mathematically, and compares them against the database. This was refined into the final `verify_neo4j.py` tool to quickly audit database parity.
-
----
-
-### Example 4: Tabbed Layout Architecture in Gradio UI
-* **Context**: Constructing the web user interface (`skeleton/ui.py`) using Gradio. The goal was to build a clean tabbed layout that separates the main AI chat assistant from auxiliary diagnostic tools.
-* **Prompt**:
-  ```text
-  How can I set up a Gradio tabbed layout that contains a chat interface in the first tab, and a route-finding tester in the second tab where users can select origin and destination stations from a dropdown?
-  ```
-* **Outcome**: The AI provided a block-based structure using `with gr.Blocks():` containing `with gr.Tab("Transit Chatbot"):` and `with gr.Tab("Multi-Modal Route Finder"):`. This structure was integrated into `skeleton/ui.py`, allowing users to test graph queries and LLM capabilities in separate, clean tabs.
