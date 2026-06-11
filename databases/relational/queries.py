@@ -329,6 +329,7 @@ def query_available_seats(
     schedule_id: str,
     travel_date: str,
     fare_class: str,
+    departure_time: Optional[str] = None,
 ) -> list[dict]:
     """
     Return available seats for a national rail journey on a given date.
@@ -337,6 +338,7 @@ def query_available_seats(
         schedule_id (str): The ID of the schedule.
         travel_date (str): The date of travel (YYYY-MM-DD).
         fare_class (str): The fare class (e.g., 'standard', 'first').
+        departure_time (str, optional): The departure time (HH:MM:SS) of the train.
 
     Returns:
         list[dict]: A sorted list of dictionaries representing available seats.
@@ -356,9 +358,13 @@ def query_available_seats(
             # 2. Fetch the seats that have already been booked and confirmed for this train on that day
             sql_booked = """
                 SELECT seat_real_id FROM bookings
-                WHERE schedule_id = %s AND travel_date = %s AND status = 'confirmed' AND seat_real_id IS NOT NULL;
+                WHERE schedule_id = %s AND travel_date = %s AND status = 'confirmed' AND seat_real_id IS NOT NULL
             """
-            cur.execute(sql_booked, (schedule_id, travel_date))
+            params = [schedule_id, travel_date]
+            if departure_time:
+                sql_booked += " AND departure_time = %s"
+                params.append(departure_time)
+            cur.execute(sql_booked, tuple(params))
             booked_seat_ids = {row["seat_real_id"] for row in cur.fetchall()}
             
             # 3. Filter out the booked seats, keeping only the available ones
@@ -532,6 +538,7 @@ def execute_booking(
     fare_class: str,
     seat_id: str,
     ticket_type: str = "single",
+    departure_time: Optional[str] = None,
 ) -> tuple[bool, dict | str]:
     """
     Create a national rail booking for a logged-in user inside an atomic transaction.
@@ -569,6 +576,9 @@ def execute_booking(
             stops_travelled = dest_order - orig_order
             default_dep_time = route_res["departure_time"]
 
+    # Use departure_time if provided, otherwise fallback to schedule's default first train time
+    final_dep_time = departure_time or default_dep_time
+
     # 2. Compute financial fare totals accurately
     fare_info = query_national_rail_fare(schedule_id, fare_class, stops_travelled)
     if not fare_info:
@@ -579,7 +589,7 @@ def execute_booking(
         amount_usd *= 2
 
     # 3. Assess seat inventory allocation
-    avail_seats = query_available_seats(schedule_id, travel_date, fare_class)
+    avail_seats = query_available_seats(schedule_id, travel_date, fare_class, departure_time=departure_time)
     if not avail_seats:
         return False, "No active seats available in this carriage class"
 
@@ -613,14 +623,17 @@ def execute_booking(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # [CRITICAL LOCKING] Apply FOR UPDATE to guarantee linearizability and prevent race conditions
-            cur.execute(
-                """
+            sql_lock = """
                 SELECT 1 FROM bookings 
                 WHERE schedule_id = %s AND travel_date = %s AND seat_real_id = %s AND status = 'confirmed'
-                FOR UPDATE NOWAIT;
-                """,
-                (schedule_id, travel_date, selected_real_id)
-            )
+            """
+            lock_params = [schedule_id, travel_date, selected_real_id]
+            if departure_time:
+                sql_lock += " AND departure_time = %s"
+                lock_params.append(departure_time)
+            sql_lock += " FOR UPDATE NOWAIT;"
+            
+            cur.execute(sql_lock, tuple(lock_params))
             if cur.fetchone():
                 conn.rollback()
                 return False, "Seat transaction collision: already booked by another active session"
@@ -635,7 +648,7 @@ def execute_booking(
             """
             cur.execute(sql_ins_booking, (
                 booking_id, user_id, schedule_id, origin_station_id, destination_station_id,
-                travel_date, default_dep_time, ticket_type, fare_class.lower(), selected_real_id,
+                travel_date, final_dep_time, ticket_type, fare_class.lower(), selected_real_id,
                 stops_travelled, amount_usd, "confirmed", now
             ))
 
