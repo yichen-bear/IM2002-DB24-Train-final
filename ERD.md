@@ -1,6 +1,3 @@
-# TransitFlow 系統資料庫 ERD 關係圖
-
-```mermaid
 erDiagram
     %% ============================================================
     %% Volume 1: Security & Users
@@ -92,7 +89,7 @@ erDiagram
     }
 
     %% ============================================================
-    %% Volume 2: Networks & Assets
+    %% Volume 2: Networks & Assets (Normalized with Stop Tables)
     %% ============================================================
     national_rail_stations ||--o{ schedules : "origin"
     national_rail_stations ||--o{ schedules : "destination"
@@ -110,9 +107,6 @@ erDiagram
         time arrival_time
         varchar32 origin_station_id FK
         varchar32 destination_station_id FK
-        text stops_in_order
-        text passed_through_stations
-        text travel_time_offset
         decimal base_fare_standard_usd
         decimal per_stop_standard_usd
         decimal base_fare_first_usd
@@ -120,6 +114,17 @@ erDiagram
         int frequency_min
         varchar100 operates_on
         boolean overnight_flag
+    }
+
+    %% 正規化新增：火車班次停靠細節（解構多值欄位）
+    schedules ||--o{ national_rail_schedule_stops : "has stop details"
+    national_rail_stations ||--o{ national_rail_schedule_stops : "is stopping at"
+
+    national_rail_schedule_stops {
+        varchar32 schedule_id PK, FK
+        varchar32 station_id PK, FK
+        int stop_sequence
+        int travel_time_offset_min
     }
     
     metro_stations ||--o{ metro_schedules : "origin"
@@ -134,12 +139,22 @@ erDiagram
         time first_train_time
         time last_train_time
         int frequency_min
-        text stops_in_order
-        text travel_time_offset
         decimal base_fare_usd
         decimal per_stop_rate_usd
         varchar100 operates_on
     }
+
+    %% 正規化新增：捷運班次停靠細節（解構多值欄位）
+    metro_schedules ||--o{ metro_schedule_stops : "has stop details"
+    metro_stations ||--o{ metro_schedule_stops : "is stopping at"
+
+    metro_schedule_stops {
+        varchar32 metro_schedule_id PK, FK
+        varchar32 station_id PK, FK
+        int stop_sequence
+        int travel_time_offset_min
+    }
+
     rail_coaches {
         varchar32 coach_id PK
         varchar32 schedule_id FK
@@ -272,7 +287,7 @@ erDiagram
     policy_categories {
         varchar32 category_id PK
         varchar20 network_type
-        varchar100 category_key
+        text rule_key
         varchar100 display_name_zh
         varchar100 display_name_en
         int sort_order

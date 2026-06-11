@@ -2,14 +2,14 @@
 
 ## 1. Embedding and Cosine Similarity Rationale
 
-在我們這個火車客服系統裡，要丟去算 Embedding（向量化）的對象，就是放在資料庫 `policy_documents` 資料表裡面的官方規章與退票政策文字檔。
+在我們的 TransitFlow 系統中，要進行向量化（Embedding）的資料，是 `policy_documents` 資料表中的政策文件內容，其來源包含 `refund_policy.json`（退票政策）、`ticket_types.json`（票價類型）、`booking_rules.json`（訂票規則）以及 `travel_policies.json`（乘車與行為規範）。這些文件會被轉成向量後存入 PostgreSQL 的 `policy_documents.embedding` 欄位，供客服檢索增強生成（RAG）系統查詢使用。
 
 ### 為什麼做語意搜尋（Semantic Search）時，用餘弦相似度（Cosine Similarity）最適合？
-最核心的原因就是餘弦相似度具備**大小無關性（Magnitude-Independent）**，它在向量空間中算的是**方向相似度（Directional Similarity）**，而不會被向量的長度大小給影響。
+最核心的原因就是餘弦相似度具備**大小無關性（Magnitude-Independent）**，它在向量空間中算的是**方向相似度（Directional Similarity）**，而不會單純被原始向量的長度大小給主導。
 
-這在我們的客服系統中非常重要。因為一般使用者進來問問題時，通常都打得很短（例如：「怎麼退票」），但我們資料庫裡存的官方退票政策，往往是一大串好幾百字的法條。如果把這兩段文字拿去轉成向量，它們的長度（Magnitude）會差非常多。
-* **如果用歐氏距離（Euclidean Distance）**：系統去算距離時，會因為這兩個向量長度差太多，誤判定這兩個句子不相似，結果就撈不到答案。
-* **如果用餘弦相似度（Cosine Similarity）**：系統只會看它們在空間中的夾角方向。只要兩邊的話題都是在講退票，它們的方向就會很接近，系統就能準確把這條政策撈出來。
+餘弦相似度非常適合語意搜尋，因為它比較的是兩個 embedding vectors 在語意空間中的方向，而不是原始向量長度。在實際的客服情境中，使用者輸入的問題通常較為簡短（例如：「怎麼退票」），而資料庫中儲存的官方規章條文篇幅較長（例如詳細的退票手續費與時間窗口梯隊）。
+
+如果採用歐氏距離（Euclidean Distance），由於兩者文本長度差異導致的向量長度（Magnitude）差距，極易在距離計算上造成誤差。而餘弦相似度則能有效避開這點：即使使用者問題很短、政策文件較長，只要兩者語意主題接近（都在討論 refund rules），它們的向量方向在多維空間中仍會非常接近，因此系統能夠精準地將對應的官方政策政策檢索出來。
 
 ---
 
@@ -18,7 +18,7 @@
 我們實作的檢索增強生成（RAG）功能，從使用者輸入問題到最後看到答案，底層完整的 Pipeline 跑了以下四個階段：
 
 1. **Query Embedding**
-   使用者在客服介面送出問題後，後端程式會先呼叫 Ollama 的 `nomic-embed-text` 模型，把這段問題文字轉換成一組固定長度的浮點數陣列（也就是問題向量）。
+   使用者在客服介面送出問題後，後端程式會先呼叫嵌入模型（如 Ollama 的 `nomic-embed-text`），把這段問題文字轉換成一組固定長度的浮點數陣列（也就是問題向量）。
 2. **Similarity Search**
    拿到問題向量後，系統會直接去 PostgreSQL 的 `policy_documents` 表下 SQL 查詢。我們在資料庫有針對 embedding 欄位建立 `USING hnsw (embedding vector_cosine_ops)` 索引，所以資料庫可以用餘弦相似度在裡面進行高速的比對。
 3. **Retrieved Documents**
@@ -34,11 +34,11 @@
 看我們 `schema.sql` 裡的設定，當初建立向量欄位是寫 `embedding vector(768)`。這代表我們目前實作是用 **Ollama 的 `nomic-embed-text`**，產生的向量維度固定是 **768 維**。如果以後我們把模型廠商切換到 **Gemini** 的話，它預設產生的向量維度則會是 **3072 維**。
 
 ### 如果在 Seed 完資料後強行「更換模型供應商」會怎樣？
-如果我們跑完 `seed_vectors.py` 把 768 維的 Ollama 向量塞進資料庫之後，沒重新 seed 就直接去 `.env` 把供應商改成 Gemini，系統會因為以下原因直接掛掉：
+如果我們跑完 `seed_vectors.py` 把 768 維的 Ollama 向量塞進資料庫之後，沒重新 seed 就直接去 `.env` 把供應商改成 Gemini，系統會因為**維度不相容**而引發連鎖錯誤：
 
 1. **維度不匹配（Dimension Mismatch）**：
-   當使用者進來問問題，系統因為設定改成了 Gemini，會用 Gemini 產出一個 **3072 維** 的問題向量。但這時候系統拿著 3072 維的向量去資料庫下 SQL 時，PostgreSQL 當初設定的欄位只能接收 **768 維**。
-2. **索引失效無法使用（Index Unusable）**：
-   因為長度根本對不起來，PostgreSQL 會直接報錯 `ERROR: vector columns must have the same dimensions`。這會導致搜尋的 SQL 查詢直接壞掉，原本針對 768 維建立的 HNSW 相似度索引也因為維度錯亂，導致**整張索引直接報廢、無法使用（Unusable）**。
+   當使用者進來問問題，系統因為設定改成了 Gemini，會用 Gemini 產出一個 **3072 維** 的問題向量。但這時候系統拿著 3072 維的向量去資料庫下 SQL 進行餘弦相似度比對時，PostgreSQL 當初設定的欄位維度只能接收 **768 維**。
+2. **索引失效與結構變更代價**：
+   因為長度根本對不起來，PostgreSQL 會直接報錯 `ERROR: vector columns must have the same dimensions`。原本建立在 768 維欄位上的 HNSW index 無法用來查 3072 維向量。若要完成模型切換，必須進資料庫把欄位改成 `vector(3072)`，清空或重建資料，重新運行 `seed_vectors.py` 塞入新模型的 embeddings，並重新建構 HNSW 索引。
 3. **實際運行的慘重後果（Practical Consequence）**：
-   對實際使用者來說，這會導致**整個客服檢索功能完全癱瘓**。只要有人發問，後端就會在查資料庫時直接噴 `500 Error`。系統不僅完全撈不到任何政策參考，LLM 也因為拿不到 Context 而沒辦法回答。前端使用者只會看到客服視窗一直轉圈圈、跳系統錯誤或直接斷線，整個智慧客服專案直接報銷。
+   對實際使用者來說，這會導致**整個客服檢索功能完全癱瘓**。只要有人發問，後端就會在查資料庫時直接噴 `500 Error`。系統不僅完全撈不到任何政策參考，LLM 也因為拿不到 Context 而沒辦法回答。前端使用者只會看到客服視窗一直轉圈圈或跳系統錯誤，智慧客服專案在維度調整與重新 Seed 完成前將無法提供服務。
