@@ -20,6 +20,8 @@ The vector functions (query_policy_vector_search, store_policy_document)
 are already implemented — do not modify them.
 """
 
+# TASK 6 EXTENSION: Added departure_time support to prevent double-booking on multi-frequency daily runs.
+
 from __future__ import annotations
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -113,12 +115,12 @@ def query_national_rail_availability(
     if not origin_id or not destination_id:
         return []
 
-    # Parse travel_date string to extract day of week name (Mon, Tue, etc.)
+    # Parse travel_date string to extract day of week name (mon, tue, etc.) in lowercase
     day_name = ""
     if travel_date:
         try:
             dt_obj = datetime.strptime(travel_date, "%Y-%m-%d").date()
-            days_map = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            days_map = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
             day_name = days_map[dt_obj.weekday()]
         except ValueError:
             pass
@@ -152,7 +154,7 @@ def query_national_rail_availability(
                 if day_name:
                     cur.execute("SELECT operates_on FROM schedules WHERE schedule_id = %s;", (sch["schedule_id"],))
                     op_row = cur.fetchone()
-                    if op_row and day_name not in op_row["operates_on"]:
+                    if op_row and day_name not in op_row["operates_on"].lower():
                         continue # Skip if train does not run on this day of the week
 
                 # Query the number of booked seats for a specific date
