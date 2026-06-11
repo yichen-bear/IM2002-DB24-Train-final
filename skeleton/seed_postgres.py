@@ -57,6 +57,7 @@ def insert_many(cur, table, columns, rows):
 
 def seed_metro_stations(cur):
     data = load("metro_stations.json")
+<<<<<<< HEAD
     stations_rows = []
     
     for s in data:
@@ -86,6 +87,11 @@ def seed_metro_stations(cur):
         stations_rows
     )
     print(f"  metro_stations: {n_stations} rows")
+=======
+    # TODO: Design your table schema, then implement the INSERT logic here.
+    # Each item in data is a dict — inspect the JSON to see available fields.
+    pass
+>>>>>>> 2cbb861da97872bb6b348b1eda33496f3d9f6c29
 
 
 def seed_national_rail_stations(cur):
