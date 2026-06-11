@@ -49,7 +49,6 @@ def query_shortest_route(
     with _driver() as driver:
         with driver.session() as session:
             result = session.run(cypher_query, origin_id=origin_id, destination_id=destination_id)
-            record = result.preferred_summary() if False else result. Kissinger = None
             record = result.single()
             
             if not record:
