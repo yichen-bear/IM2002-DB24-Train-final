@@ -730,6 +730,12 @@ JSON:"""
         if tool_name == "find_alternative_routes":
             if "NR03" in user_message.upper() and params.get("avoid_station_id") == "MS07":
                 params["avoid_station_id"] = "NR03"
+                
+        if tool_name == "search_policy":
+            # If the LLM hallucinates the JSON schema instead of a string value, fallback to the user message
+            query_val = params.get("query", "")
+            if not isinstance(query_val, str) or not query_val:
+                params["query"] = user_message
         
 
         if debug:

@@ -180,6 +180,11 @@ def seed_national_rail_schedules(cur):
         operates_on_str = ",".join(sch.get("operates_on", []))
         sched_id = sch["schedule_id"]
         
+        # Extract fares from fare_classes
+        fares = sch.get("fare_classes", {})
+        standard_fare = fares.get("standard", fares.get("economy", {}))
+        first_fare = fares.get("first", fares.get("business", {}))
+
         # 1. Collect master table rows (17 columns matching normalized schema)
         schedules_rows.append((
             sched_id,                                   # 1. schedule_id
@@ -192,10 +197,10 @@ def seed_national_rail_schedules(cur):
             sch.get("last_train_time", "23:00:00"),               # 8. arrival_time
             sch.get("origin_station_id"),                         # 9. origin_station_id
             sch.get("destination_station_id"),                    # 10. destination_station_id
-            sch.get("base_fare_standard", sch.get("base_fare_economy")), # 11. base_fare_standard_usd
-            sch.get("per_stop_standard", sch.get("per_stop_economy")),   # 12. per_stop_standard_usd
-            sch.get("base_fare_first", sch.get("base_fare_business")),   # 13. base_fare_first_usd
-            sch.get("per_stop_first", sch.get("per_stop_business")),     # 14. per_stop_first_usd
+            standard_fare.get("base_fare_usd", 0.0),              # 11. base_fare_standard_usd
+            standard_fare.get("per_stop_rate_usd", 0.0),          # 12. per_stop_standard_usd
+            first_fare.get("base_fare_usd", 0.0),                 # 13. base_fare_first_usd
+            first_fare.get("per_stop_rate_usd", 0.0),             # 14. per_stop_first_usd
             sch.get("frequency_min"),                             # 15. frequency_min
             operates_on_str,                                      # 16. operates_on
             sch.get("overnight_flag", False)                      # 17. overnight_flag

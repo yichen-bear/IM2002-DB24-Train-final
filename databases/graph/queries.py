@@ -98,11 +98,11 @@ def query_cheapest_route(
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
     MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
-    WITH path,
+        WITH path,
          reduce(cost = 0.0, r IN relationships(path) | 
             cost + CASE type(r)
-                WHEN 'METRO_LINK' THEN coalesce(r.cost_usd, 1.50)
-                WHEN 'RAIL_LINK' THEN coalesce(r.cost_usd, $rail_cost)
+                WHEN 'METRO_LINK' THEN 1.50
+                WHEN 'RAIL_LINK' THEN $rail_cost
                 ELSE 0.0
             END
          ) AS total_fare
@@ -296,7 +296,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
                     
                 ripple_effects.append({
                     "station_id": st_id,
-                    "name": record["name"],
+                    "station_name": record["name"],
                     "hops_away": record["hops_away"],
                     "lines_affected": lines
                 })
