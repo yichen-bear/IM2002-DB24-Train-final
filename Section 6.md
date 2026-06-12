@@ -15,14 +15,14 @@ This section reflects on the key design decisions made during the development of
 ### Decision B: Partitioning Node Labels by Transit Network (`:MetroStation` vs `:NationalRailStation`)
 * **Design Choice**: Rather than using a generic label like `:Station` for every node in the graph, stations are explicitly partitioned into two distinct labels: `:MetroStation` and `:NationalRailStation`.
 * **Rationale**:
-  1. **Query Optimization**: Isolating the labels prevents the traversal engine from scanning irrelevant nodes. For example, if a query is searching for a path strictly within the city metro line (M1–M4), the engine restricts its search path to `:MetroStation` nodes, skipping national rail stations entirely.
+  1. **Query Optimization**: The separate labels make it possible to write network-specific Cypher queries, such as matching only :MetroStation nodes for metro-only analysis. Even when a multi-modal query uses both labels, label partitioning keeps the graph model semantically clear and avoids relying on a single overloaded :Station label with many conditional properties.
   2. **Properties Separation & Polymorphic Resolution**: Metro stations contain specific interchange fields (such as `interchange_metro_lines`) that do not apply to rail stations. Explicit label partitioning keeps the graph schema clean and well-typed, allowing the polymorphic association defined in the relational table `station_adjacencies` to be cleanly resolved within the graph traversal space.
 
 ### Decision C: Pre-calculated Interchange Edges (`:INTERCHANGE_TO`)
 * **Design Choice**: Instead of dynamically calculating whether a metro station and a rail station share a physical interchange during routing queries, these links are explicitly modeled as bidirectional `:INTERCHANGE_TO` relationships during the seeding phase.
 * **Rationale**:
   1. **Latency Reduction**: Calculating geographic proximities or matching station names on the fly during a path traversal query adds runtime computational cost. Pre-seeding the interchange relationships trades a tiny amount of database disk space for sub-millisecond route-finding queries.
-  2. **Encapsulating Transfer Logic**: Transfer times or walking penalties can be attached directly to the `:INTERCHANGE_TO` edges as properties, enabling routing algorithms to easily factor transfer overhead into their calculations.
+  2. **Encapsulating Transfer Logic**: In the current project, INTERCHANGE_TO is modeled as a zero-time transfer edge, matching the project assumption that interchange time is not included in route estimates. In a future extension, transfer penalties could be added as relationship properties if the routing model needs to account for walking time.
 
 ---
 
