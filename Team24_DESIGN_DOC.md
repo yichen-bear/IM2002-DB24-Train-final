@@ -512,3 +512,83 @@ Neo4j 底層用的是 **免索引鄰接（Index-Free Adjacency）** 的技術。
    因為長度根本對不起來，PostgreSQL 會直接報錯 `ERROR: vector columns must have the same dimensions`。原本建立在 768 維欄位上的 HNSW index 無法用來查 3072 維向量。若要完成模型切換，必須進資料庫把欄位改成 `vector(3072)`，清空或重建資料，重新運行 `seed_vectors.py` 塞入新模型的 embeddings，並重新建構 HNSW 索引。
 3. **實際運行的慘重後果（Practical Consequence）**：
    對實際使用者來說，這會導致**整個客服檢索功能完全癱瘓**。只要有人發問，後端就會在查資料庫時直接噴 `500 Error`。系統不僅完全撈不到任何政策參考，LLM 也因為拿不到 Context 而沒辦法回答。前端使用者只會看到客服視窗一直轉圈圈或跳系統錯誤，智慧客服專案在維度調整與重新 Seed 完成前將無法提供服務。
+
+---
+
+## Section 5 — AI Tool Usage Evidence
+
+This section documents the structured collaboration with AI tools during the graph database design, seeding development, verification scripting, and UI integration phases of the TransitFlow system. Below are three distinct examples illustrating how AI assistance was utilized, focusing on the specific responsibilities of this role.
+
+---
+
+### Example 1: Graph Modeling and Label Partitioning Decision
+* **Context**: Designing the Neo4j graph database schema in `seed_neo4j.py` to support multi-modal transit routing. The challenge was deciding whether to represent all stations under a single generic label or partition them into distinct networks, which directly impacts how polymorphic station associations from the relational schema (`station_adjacencies`) are mapped.
+* **Prompt**:
+  ```text
+  We are seeding a Neo4j database from two JSON files containing station records: metro stations and national rail stations. Should we label all stations with a single (:Station) label, or separate labels like (:MetroStation) and (:NationalRailStation)? How should we model the connection edges between them to enable efficient routing search?
+  ```
+* **Outcome**: The AI suggested using partitioned labels (`MetroStation` and `NationalRailStation`) to isolate the two transit systems in memory, avoiding scanning rail station nodes during metro-only traversals. For connectivity, it recommended establishing separate edge types (`METRO_LINK` and `RAIL_LINK`) and bridging them via bidirectional `INTERCHANGE_TO` edges at interchange hubs. This graph model was implemented in `seed_neo4j.py`.
+
+---
+
+### Example 2: Edge Property Data Type Enforcement (AI Error & Correction)
+* **Context**: Resolving a Cypher runtime error where the pathfinding query failed to calculate total trip durations because travel times were imported as string variables rather than numbers.
+* **Prompt**:
+  ```text
+  In my Neo4j database, when I run a Cypher query using `reduce(t = 0, r IN relationships(path) | t + r.travel_time_min)`, it fails with a type mismatch error because some relationships store `travel_time_min` as strings. Show me how to fix my Python seeder script where I retrieve properties from the parsed JSON data.
+  ```
+* **Outcome (Incorrect AI Suggestion)**: The AI suggested modifying the Cypher query to perform dynamic type casting during traversal, e.g., `toInteger(r.travel_time_min)`.
+* **Why it was incorrect**: Executing `toInteger()` dynamically inside the Cypher traversal engine introduces substantial runtime CPU overhead for every edge visited. In a production routing system with deep paths, this degrades performance. The correct place to solve this is during the data ingest phase.
+* **Correction**: The suggestion was rejected. Instead, the seeder script `seed_neo4j.py` was corrected by explicitly casting the JSON values using `int(adj["travel_time_min"])` when parameterizing the `session.run` parameters. This ensures that only pure integer types are stored on edges, allowing the Neo4j engine to execute the `reduce` summation natively at maximum speed.
+
+---
+
+### Example 3: Automated Parity Check Scripting for Graph Integrity
+* **Context**: Creating an automated verification script (`skeleton/verify_neo4j.py`) to guarantee that the seeded graph nodes and relationships match the source JSON mock files perfectly.
+* **Prompt**:
+  ```text
+  Write a Python script that connects to Neo4j and validates that the number of MetroStation and NationalRailStation nodes matches the count of items in metro_stations.json and national_rail_stations.json, and counts the relationship edges to make sure they correspond to the number of adjacencies.
+  ```
+* **Outcome**: The AI generated a script template using the Neo4j Python driver. It loads the JSON payloads into memory, queries node labels, computes expected edge counts mathematically, and compares them against the database. This was refined into the final `verify_neo4j.py` tool to quickly audit database parity.
+
+---
+
+## Section 6 — Reflection & Trade-offs
+
+This section reflects on the key design decisions made during the development of the database infrastructure (including both Relational and Graph layers) and the UI integration layers, detailing the engineering rationales behind them and discussing production considerations.
+
+---
+
+### 1. Selected Design Decisions and Rationales
+
+#### Decision A: Dual Primary Key (PK) Selection Strategy — Balancing Security and Write Performance
+* **Design Choice**: Rather than uniformly applying a single data type for all Primary Keys across the entire database system, we implemented a dual PK strategy based on the data's inherent nature. Core business tables (`users`, `bookings`, `payments`) utilize `VARCHAR(32)` to store non-sequential UUIDs/HashIDs, whereas telemetry log tables (`metro_access_logs`) utilize a fast auto-incrementing `BIGINT GENERATED ALWAYS AS IDENTITY` (Serial).
+* **Rationale**:
+  1. **Security & Privacy Orientation (`VARCHAR(32)` for UUIDs)**: For user profiles and financial booking records, utilizing standard serial integers exposes the system to **Insecure Direct Object Reference (IDOR)** vulnerability, where attackers can easily guess adjacent record IDs by simply incrementing URLs. Storing UUIDs as `VARCHAR(32)` guarantees unguessable, non-sequential references, providing security isolation and seamless support for distributed environments.
+  2. **Performance & Throughput Orientation (`BIGINT IDENTITY`)**: For the turnstile gate logs (`metro_access_logs`), data ingestion is highly concurrent and append-only. Storing random `VARCHAR` keys here would severely bottleneck the database due to constant **B-Tree index page splits** and memory fragmentation during random inserts. Adhering to strict performance-driven database concepts, we explicitly avoided `VARCHAR` for logs and leveraged `BIGINT IDENTITY` to preserve native, chronological sorting and maximized insert speed.
+
+#### Decision B: Partitioning Node Labels by Transit Network (`:MetroStation` vs `:NationalRailStation`)
+* **Design Choice**: Rather than using a generic label like `:Station` for every node in the graph, stations are explicitly partitioned into two distinct labels: `:MetroStation` and `:NationalRailStation`.
+* **Rationale**:
+  1. **Query Optimization**: The separate labels make it possible to write network-specific Cypher queries, such as matching only :MetroStation nodes for metro-only analysis. Even when a multi-modal query uses both labels, label partitioning keeps the graph model semantically clear and avoids relying on a single overloaded :Station label with many conditional properties.
+  2. **Properties Separation & Polymorphic Resolution**: Metro stations contain specific interchange fields (such as `interchange_metro_lines`) that do not apply to rail stations. Explicit label partitioning keeps the graph schema clean and well-typed, allowing the polymorphic association defined in the relational table `station_adjacencies` to be cleanly resolved within the graph traversal space.
+
+#### Decision C: Pre-calculated Interchange Edges (`:INTERCHANGE_TO`)
+* **Design Choice**: Instead of dynamically calculating whether a metro station and a rail station share a physical interchange during routing queries, these links are explicitly modeled as bidirectional `:INTERCHANGE_TO` relationships during the seeding phase.
+* **Rationale**:
+  1. **Latency Reduction**: Calculating geographic proximities or matching station names on the fly during a path traversal query adds runtime computational cost. Pre-seeding the interchange relationships trades a tiny amount of database disk space for sub-millisecond route-finding queries.
+  2. **Encapsulating Transfer Logic**: In the current project, INTERCHANGE_TO is modeled as a zero-time transfer edge, matching the project assumption that interchange time is not included in route estimates. In a future extension, transfer penalties could be added as relationship properties if the routing model needs to account for walking time.
+
+---
+
+### 2. Production System Considerations
+
+To scale the graph database and UI for a production environment serving large-scale daily commuters, the following changes would be necessary:
+
+#### Causal Clustering for Neo4j Scaling
+* **Current Implementation**: The system runs on a single, isolated Neo4j instance in a Docker container.
+* **Production Requirement**: Transit routing queries are highly read-intensive. A single instance would quickly bottleneck under concurrent requests. A production deployment would implement a **Neo4j Causal Cluster** with one primary writer instance and multiple read replicas. This offloads routing and pathfinding calculations to read-only instances, ensuring horizontal scalability.
+
+#### Graph Data Syncing and Event-Driven Seeding
+* **Current Implementation**: The seeder script clears the entire graph and recreates all nodes and edges from scratch from static JSON mock files.
+* **Production Requirement**: In a live system, station statuses (closures, delays) and schedules change dynamically. The seeder must be replaced with an **event-driven syncing pipeline** (e.g., listening to database triggers or a Kafka message queue). This allows the graph to receive incremental updates (updating relationship weights or station availability) in real time without downtime.
