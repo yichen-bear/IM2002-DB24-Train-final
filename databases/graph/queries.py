@@ -91,6 +91,8 @@ def query_cheapest_route(
     Find the cheapest path by dynamically aggregating cost structures 
     (metro flat/distance rates vs rail fixed matrices) across relationship variables.
     """
+    rail_cost = 9.50 if fare_class.lower() == "first" else 4.50
+
     # Uses reduce operation to compute granular ticket prices mathematically
     cypher_query = """
     MATCH (start {station_id: $origin_id})
@@ -98,11 +100,11 @@ def query_cheapest_route(
     MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WITH path,
          reduce(cost = 0.0, r IN relationships(path) | 
-            cost + case 
-                when type(r) = 'METRO_LINK' then coalesce(r.cost_usd, 1.50)
-                when type(r) = 'RAIL_LINK' then coalesce(r.cost_usd, 4.50)
-                else 0.0 -- Transfers are free or encapsulated in baseline boarding fares
-            end
+            cost + CASE type(r)
+                WHEN 'METRO_LINK' THEN coalesce(r.cost_usd, 1.50)
+                WHEN 'RAIL_LINK' THEN coalesce(r.cost_usd, $rail_cost)
+                ELSE 0.0
+            END
          ) AS total_fare
     RETURN path, total_fare
     ORDER BY total_fare ASC
@@ -110,7 +112,7 @@ def query_cheapest_route(
     """
     
     with _DRIVER.session() as session:
-        result = session.run(cypher_query, origin_id=origin_id, destination_id=destination_id)
+        result = session.run(cypher_query, origin_id=origin_id, destination_id=destination_id, rail_cost=rail_cost)
         record = result.single()
         
         if not record:
