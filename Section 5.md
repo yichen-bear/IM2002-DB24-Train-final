@@ -1,6 +1,6 @@
 # Section 5 — AI Tool Usage Evidence
 
-This section documents the structured collaboration with AI tools during the graph database design, seeding development, verification scripting, and UI integration phases of the TransitFlow system. Below are four distinct examples illustrating how AI assistance was utilized, focusing on the specific responsibilities of this role.
+This section documents the structured collaboration with AI tools during the graph database design, seeding development, verification scripting, and UI integration phases of the TransitFlow system. Below are three distinct examples illustrating how AI assistance was utilized, focusing on the specific responsibilities of this role.
 
 ---
 
