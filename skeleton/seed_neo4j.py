@@ -49,6 +49,11 @@ def seed():
         session.run("MATCH (n) DETACH DELETE n")
         print("  Cleared existing graph data")
 
+        # 0. Create Constraints
+        print("  Creating constraints and indexes...")
+        session.run("CREATE CONSTRAINT metro_station_id_unique IF NOT EXISTS FOR (s:MetroStation) REQUIRE s.station_id IS UNIQUE")
+        session.run("CREATE CONSTRAINT nr_station_id_unique IF NOT EXISTS FOR (s:NationalRailStation) REQUIRE s.station_id IS UNIQUE")
+
         # 1. Create City Metro Station Nodes (MetroStation)
         print("  Creating MetroStation nodes...")
         for station in metro_stations:
