@@ -1,4 +1,5 @@
 ## Section 1 — ERD
+
 ```mermaid
 erDiagram
     %% ============================================================
@@ -27,7 +28,7 @@ erDiagram
     %% ============================================================
     metro_stations ||--o{ station_adjacencies : "acts as source/adjacent"
     national_rail_stations ||--o{ station_adjacencies : "acts as source/adjacent"
-    
+
     metro_stations {
         varchar32 station_id PK
         varchar100 name
@@ -133,7 +134,7 @@ erDiagram
 
     metro_stations ||--o{ metro_schedules : "origin"
     metro_stations ||--o{ metro_schedules : "destination"
-    
+
     metro_schedules {
         varchar32 metro_schedule_id PK
         varchar50 line
@@ -151,7 +152,7 @@ erDiagram
     %% Normalized stop sequence table for Metro schedules
     metro_schedules ||--o{ metro_schedule_stops : "has ordered stops" 
     metro_stations ||--o{ metro_schedule_stops : "appears in" 
-    
+
     metro_schedule_stops { 
         varchar32 metro_schedule_id PK, FK 
         int stop_order PK 
@@ -326,132 +327,136 @@ erDiagram
     }
 ```
 
+---
 
 ## Section 2 — Normalisation Justification
 
 ### 1. Relational Normalisation Decisions (3NF)
 
-在 TransitFlow 系統的核心關聯式資料庫設計中，特別是班次、車站、停靠順序與交易資料的設計上，本專案以 **Third Normal Form (3NF，第三正規化)** 為主要設計原則，旨在降低資料冗餘（Data Redundancy）、避免結構性的更新異常（Update Anomalies），並維護資料的一致性。
+In the core relational database design of the TransitFlow system, especially in the design of schedules, stations, stop ordering, and transaction data, this project mainly follows **Third Normal Form (3NF)** as its design principle. The goal is to reduce data redundancy, avoid structural update anomalies, and maintain data consistency.
 
-本系統中一項展現 2NF 與 3NF 設計決策的核心實例，在於解決「車站（Stations）」與「營運班次（Schedules）」之間複雜的多對多（M:N）關係，我們藉由導入聯合表（Junction Table）`metro_schedule_stops` 與 `national_rail_schedule_stops` 來進行完美的綱要解耦。
+A key example that demonstrates both 2NF and 3NF design decisions is the handling of the complex many-to-many (M:N) relationship between stations and operating schedules. This project introduces the junction tables `metro_schedule_stops` and `national_rail_schedule_stops` to achieve clear schema decomposition.
 
-* **Candidate Keys 與 Functional Dependencies（功能相依）之分析**：
-  若在未經正規化的不良設計中，開發者可能會試圖將班次與停靠站資訊硬塞在同一張表中。在這種情況下，若以複合鍵 `{schedule_id, station_id}` 作為 Primary Key，非主屬性（如班次所屬的 `line`、票價欄位，或停靠關係中的 `travel_time_offset`）將產生混亂的相依關係。
-  
-  具體而言：`line` 僅相依於 `schedule_id`，而 `station_name` 僅相依於 `station_id`（這兩者皆為部分相依，違反 2NF）；同時，停靠關係本身的屬性如 `travel_time_offset` 則應嚴格相依於完整的 `{schedule_id, stop_order}` 組合。若強行合併，不僅引發資料重複，一旦車站改名更會造成全表多處的 Update Anomalies。
+* **Analysis of Candidate Keys and Functional Dependencies**:  
+  In an unnormalised design, a developer might attempt to store schedule and stopping-station information directly in the same table. In that case, if `{schedule_id, station_id}` were used as the primary key, non-key attributes such as the schedule’s `line`, fare columns, or stop-specific attributes such as `travel_time_offset` would create confused dependency relationships.
 
-* **藉由 Junction Table 達成 3NF 合規性**：
-  為了解決上述缺陷，本專案的 Schema 實作了完全解耦的 3NF 架構：
-  1. 將實體分離：車站基礎屬性存放於 `metro_stations`，班次通用屬性存放於 `metro_schedules`。
-  2. 建立中介表：透過 `metro_schedule_stops` 作為聯合表，使用複合主鍵 `{metro_schedule_id, stop_order}` 來記錄特定班次在特定停靠順序上的車站（`station_id`）與相對行車時間（`travel_time_offset`）。
+  Specifically, `line` depends only on `schedule_id`, while `station_name` depends only on `station_id`. These are partial dependencies and therefore violate 2NF. At the same time, stop-specific attributes such as `travel_time_offset` should depend strictly on the full `{schedule_id, stop_order}` combination. If all of these fields were forced into a single table, the design would create repeated data and would cause update anomalies whenever a station name or schedule-level attribute changes.
 
-  透過此項設計，所有非鍵屬性（Non-key attributes）皆嚴格相依於「主鍵、完整的主鍵，且僅有主鍵（the key, the whole key, and nothing but the key）」。此決策徹底根絕了 Partial Dependency（部分相依）與 Transitive Dependency（遞移相依），保證了關聯查詢時的結構完整性。
+* **Achieving 3NF Compliance Through Junction Tables**:  
+  To solve these problems, the schema implements a decomposed 3NF structure:
+
+  1. Entity attributes are separated: basic station attributes are stored in `metro_stations`, while schedule-level attributes are stored in `metro_schedules`.
+  2. A junction table is introduced: `metro_schedule_stops` uses the composite primary key `{metro_schedule_id, stop_order}` to record which station (`station_id`) appears at a specific stop order within a specific schedule, together with the relative travel time (`travel_time_offset`).
+
+  With this design, all non-key attributes depend on “the key, the whole key, and nothing but the key.” This design removes partial dependencies and transitive dependencies, and it preserves structural integrity during relational queries.
 
 ---
 
 ### 2. Deliberate De-normalisation Trade-offs
 
-在本系統的架構規劃中，雖然基礎資料維持嚴格的 3NF，但針對核心交易表 `bookings`（訂單），**本專案刻意採用了「歷史快照（Transaction Snapshot）」的設計模式，這是一項經過深思熟慮的有意反正規化（Deliberate De-normalisation）權衡。**
+Although the base data in this system is maintained under a strict 3NF-oriented design, the core transaction table `bookings` intentionally uses a **transaction snapshot** pattern. This is a deliberate denormalisation trade-off.
 
-* **審計正確性（Audit Accuracy）與歷史不可變性之權衡論證**：
-  在嚴格正規化的設計下，訂單金額與起訖站資訊可以透過 `JOIN` 回 `schedules`、`national_rail_schedule_stops` 與站點資料表，並依照票價欄位（如 `base_fare_standard_usd`、`per_stop_standard_usd`、`base_fare_first_usd` 等）動態重新計算。然而，在大眾運輸與電子商務系統中，票價基準（Base Fare）與車站營運狀態是會隨時間變更的。
-  
-  如果明天系統調漲了票價，嚴格 3NF 下動態 `JOIN` 算出來的歷史訂單金額將會跟著改變，這將導致災難性的財務帳目不一致與稽核失敗。
+* **Trade-off Between Audit Accuracy and Historical Immutability**:  
+  Under a strictly normalised design, booking amounts and origin/destination station information could be dynamically recalculated by joining back to `schedules`, `national_rail_schedule_stops`, and station tables, using fare columns such as `base_fare_standard_usd`, `per_stop_standard_usd`, and `base_fare_first_usd`. However, in public transport and e-commerce systems, base fares and station operating conditions may change over time.
 
-* **結論**：
-  為了解決此問題，我們在 `bookings` 資料表中，刻意將 `amount_usd`（交易金額）、`departure_time`（出發時間）、`origin_station_id` 等當下狀態，直接作為冗餘欄位存儲下來。
-  
-  此種反正規化設計將當下的營運狀態「凍結」為歷史快照。同時，我們搭配嚴格的 Foreign Key 約束（例如在訂單關聯 `bookings.user_id` 中採用 `ON DELETE RESTRICT`，嚴禁輕易刪除帶有交易紀錄的使用者，而非危險的 `CASCADE`），確保了金融稽核數據具備絕對的不可篡改性與歷史正確性。這是為了滿足商業金流邏輯而必須且完全合理的 Trade-off。
+  If the system increases fares tomorrow, dynamically recalculating historical bookings through joins would change the apparent amount of past transactions. This would create serious financial inconsistency and would fail audit requirements.
+
+* **Conclusion**:  
+  To solve this problem, the `bookings` table intentionally stores selected current-state values directly, including `amount_usd`, `departure_time`, and `origin_station_id`.
+
+  This denormalised design freezes the operational state at the time of booking as a historical snapshot. At the same time, strict foreign key constraints are used. For example, `bookings.user_id` uses `ON DELETE RESTRICT`, preventing users with transaction records from being deleted casually, rather than using a dangerous `CASCADE` behaviour. This preserves the immutability and historical correctness of financial audit data. The design is therefore a necessary and reasonable trade-off for the business and payment logic of the system.
 
 ---
 
-### 3. Cryptographic Password Hashing & Salt Management
+### 3. Cryptographic Password Hashing and Salt Management
 
-為了保障用戶憑證（User Credentials）的隱私安全並防止潛在的資料庫外洩風險，本系統的應用程式層（Application Layer）導入了符合工業級標準的 **Argon2id** 密碼學雜湊演算法，且資料庫的 `user_credentials.password_hash` 欄位結構亦專門設計用於存儲其生成的複雜雜湊值，全面淘汰已被證實具備安全漏洞的傳統基元如 MD5 或 SHA-1。
+To protect user credentials and reduce the risk of database leakage, the application layer of this system uses the industry-standard **Argon2id** password hashing algorithm. The `user_credentials.password_hash` field is designed to store the complex hash output produced by the application. This approach replaces insecure legacy primitives such as MD5 and SHA-1.
 
-* **選用 Argon2id 取代替代方案（MD5/SHA-1）之核心理由**：
-  MD5 與 SHA-1 本質上屬於追求極致執行效率的通用型密碼學雜湊函數。由於其缺乏內在的計算複雜度約束，一旦系統資料庫遭到惡意拖庫（Database Breach），外部攻擊者可輕易利用現代消費級 GPU 叢集或 ASIC 晶片，進行每秒高達數十億次的高速暴力破解（Brute-force Cracking）。
-  
-  作為密碼雜湊競賽（Password Hashing Competition）的優勝演算法，Argon2id 藉由 **Key Stretching（金鑰延伸）** 機制，將雜湊運算與硬體資源開銷進行強制綁定。其引入了三項數學成本參數（Cost Factors）：
+* **Why Argon2id Is Used Instead of MD5 or SHA-1**:  
+  MD5 and SHA-1 are general-purpose cryptographic hash functions designed for high execution speed. Because they do not include built-in computational cost controls, if a database breach occurs, attackers can use modern GPUs or ASIC hardware to perform extremely fast brute-force cracking.
 
-  1. **Memory Cost（記憶體開銷）**：設定計算單一雜湊所必須佔用的 RAM 區塊大小。此 **Memory-hard（記憶體困難）** 特性，能有效使平行運算硬體（如 GPU）因記憶體頻寬枯竭而陷入效能癱瘓。
-  2. **Time Cost（時間開銷）**：控制順序迭代次數（Iterations），拉長單次密碼驗證的執行時間。
-  3. **Parallelism（並行度）**：指定運算時的 CPU 執行緒（Threads）數量。
+  Argon2id, the winner of the Password Hashing Competition, uses **key stretching** to bind the hashing process to hardware resource costs. It introduces three major cost parameters:
 
-  這些設計在物理層面上對攻擊者課徵了極高的算力成本，使得大規模密碼破解在經濟上完全不可行。
+  1. **Memory Cost**: Controls how much RAM is required to compute a single hash. This memory-hard property makes large-scale parallel cracking on GPUs much more expensive because the attack becomes constrained by memory bandwidth.
+  2. **Time Cost**: Controls the number of sequential iterations, increasing the time required for a single password verification.
+  3. **Parallelism**: Specifies the number of CPU threads used during computation.
 
-* **Salt（鹽值）防禦 Rainbow-Table Attacks（彩虹表攻擊）之運作機制**：
-  若資料庫僅儲存單純的密碼雜湊值，當兩位用戶設定了相同的常用密碼（例如 `"Transit2026"`）時，未加鹽的函數會產生完全相同的十六進制字串。攻擊者便可利用預先計算好的大規模常用詞彙雜湊對照矩陣——即 **Rainbow Tables（彩虹表）**——來瞬間進行反向破解。
-  
-  Argon2id 在雜湊運算啟動前，會自動為每個帳號生成一段具備加密強度（Cryptographically Secure）的隨機位元組序列（**Salt 鹽值**），並將其與明文密碼拼接：
+  These design choices impose a high computational cost on attackers and make large-scale password cracking economically impractical.
+
+* **How Salt Defends Against Rainbow-Table Attacks**:  
+  If a database stores only unsalted password hashes, then two users who choose the same common password, such as `"Transit2026"`, will produce the same hash string. Attackers can then use precomputed lookup tables of common password hashes, known as rainbow tables, to reverse those hashes quickly.
+
+  Before hashing, Argon2id generates a cryptographically secure random byte sequence known as a **salt** for each account, and combines it with the plaintext password:
 
   $$
-  \text{Hash} = \text{Argon2id}(\text{Plaintext Password} + \text{Unique Salt})
+  \text{Hash} = \text{Argon2id}(\text{Plaintext Password}, \text{Unique Salt}, \text{Cost Parameters})
   $$
 
-  由於每個用戶的鹽值皆絕對獨立且隨機，即使兩位用戶明文密碼完全一致，寫入資料庫 `password_hash` 欄位的字串也會變得毫無關聯。此舉徹底瓦解了彩虹表檢索機制，迫使攻擊者必須逐一對個別帳戶進行代價高昂的單獨破譯。
+  Because every user has an independent and random salt, two users with the same plaintext password will still have unrelated stored hash strings. This defeats rainbow-table lookup and forces attackers to crack each account individually with a high computational cost.
+
+---
 
 ## Section 3 — Graph Database Design Rationale
 
 ### 1. Data Modeling Decision: Nodes, Relationships, and Properties
 
-TransitFlow 的 graph database 主要用來支援 route planning、cross-network interchange routing，以及 delay ripple analysis。由於這些問題本質上都和「車站之間如何連接」有關，因此 graph model 比單純用 relational joins 更適合表達交通網路拓撲。
+The TransitFlow graph database is mainly used to support route planning, cross-network interchange routing, and delay ripple analysis. These problems are fundamentally about how stations are connected to one another, so a graph model is a better fit for representing transit network topology than relying only on relational joins.
 
 #### Nodes
 
-Neo4j 中主要建立了兩種 station node labels：
+Neo4j creates two main station node labels:
 
 - `(:MetroStation)`
 - `(:NationalRailStation)`
 
-這樣設計的原因是 metro 與 national rail 雖然都屬於 station，但它們來自不同的 transit network，且具有不同的資料來源與部分不同的 properties。使用分開的 labels 可以讓 graph schema 更清楚，也讓未來可以寫出 network-specific queries，例如只分析 metro stations，或只分析 national rail stations。
+This design is used because metro stations and national rail stations belong to different transit networks, come from different data sources, and have some different properties. Separating them into different labels keeps the graph schema clearer and also makes it possible to write network-specific queries, such as analysing only metro stations or only national rail stations.
 
-每個 node 主要包含：
+Each node mainly contains:
 
 - `station_id`
 - `name`
 - `lines`
 - interchange-related fields
 
-其中 `station_id` 是 graph database 和 relational database 之間銜接的主要 identifier。
+The `station_id` is the main identifier used to connect the graph database with the relational database.
 
 #### Relationships
 
-Graph 中主要建立了三種 relationship types：
+The graph mainly creates three relationship types:
 
 - `-[:METRO_LINK]->`
 - `-[:RAIL_LINK]->`
 - `-[:INTERCHANGE_TO]->`
 
-`METRO_LINK` 用來表示 metro network 內相鄰站點之間的連接。  
-`RAIL_LINK` 用來表示 national rail network 內相鄰站點之間的連接。  
-`INTERCHANGE_TO` 則用來連接可以互相轉乘的 metro station 和 national rail station。
+`METRO_LINK` represents adjacent station connections within the metro network.  
+`RAIL_LINK` represents adjacent station connections within the national rail network.  
+`INTERCHANGE_TO` connects metro stations and national rail stations where passengers can transfer between the two networks.
 
-在 seeding 階段，`INTERCHANGE_TO` 被建立為 bidirectional relationships，因此使用者可以從 metro 轉到 national rail，也可以從 national rail 轉回 metro。這讓 cross-network routing 可以在同一個 graph traversal 中完成，而不需要在 application layer 手動拼接兩段路線。
+During the seeding phase, `INTERCHANGE_TO` relationships are created bidirectionally. This allows users to transfer from metro to national rail and also from national rail back to metro. As a result, cross-network routing can be completed in a single graph traversal, without manually combining two separate route segments in the application layer.
 
 #### Properties
 
-Node properties 主要描述車站本身，例如 `station_id`、`name` 和 `lines`。這些資料屬於 station entity，因此適合放在 node 上。
+Node properties mainly describe the station itself, such as `station_id`, `name`, and `lines`. These attributes belong to the station entity and are therefore stored on the node.
 
-Relationship properties 則描述「兩個車站之間的連接」。對於 `METRO_LINK` 和 `RAIL_LINK`，relationship 上存放：
+Relationship properties describe the connection between two stations. For `METRO_LINK` and `RAIL_LINK`, the relationship stores:
 
 - `line`
 - `network_type`
 - `travel_time_min`
 
-這樣設計的原因是 route planning 需要累加每一段 edge 的 travel time。把 `travel_time_min` 放在 relationship 上，可以讓 Cypher query 在遍歷 path 時直接從 `relationships(path)` 讀取每段邊的時間並加總。
+This design is used because route planning needs to accumulate the travel time of each edge in a path. Storing `travel_time_min` on the relationship allows a Cypher query to directly read each edge’s travel time from `relationships(path)` and sum the values.
 
-`INTERCHANGE_TO` 在目前專案中代表 zero-time transfer edge，因此不額外存放 `travel_time_min` 或 `line`。在最快路徑查詢中，這類 edge 會透過 `coalesce(r.travel_time_min, 0)` 被視為 0 分鐘轉乘邊。
+In the current project, `INTERCHANGE_TO` represents a zero-time transfer edge, so it does not store `travel_time_min` or `line`. In the fastest route query, this type of edge is treated as a 0-minute transfer through `coalesce(r.travel_time_min, 0)`.
 
 ---
 
 ### 2. Why Graph Database Is Suitable for Routing
 
-Route planning and delay propagation are naturally graph traversal problems. In a transit network, stations can be represented as nodes, and physical or logical connections between stations can be represented as relationships. This allows the database to traverse from one station to its connected stations directly.
+Route planning and delay propagation are naturally graph traversal problems. In a transit network, stations can be represented as nodes, and physical or logical connections between stations can be represented as relationships. This allows the database to traverse directly from one station to its connected stations.
 
-If the same routing task were implemented purely in PostgreSQL, the system would need to repeatedly join an adjacency table, such as `station_adjacencies`, to explore paths with increasing depth. This is possible with recursive CTEs, but it becomes harder to write, debug, and optimize as the number of hops and path constraints increases.
+If the same routing task were implemented purely in PostgreSQL, the system would need to repeatedly join an adjacency table, such as `station_adjacencies`, to explore paths with increasing depth. This is possible with recursive CTEs, but it becomes harder to write, debug, and optimise as the number of hops and path constraints increases.
 
-In Neo4j, the relationships are first-class data objects. The query can directly expand from a station through `METRO_LINK`, `RAIL_LINK`, and `INTERCHANGE_TO` relationships. This makes multi-hop route search, cross-network interchange routing, and delay ripple analysis more natural to express than repeated SQL self-joins.
+In Neo4j, relationships are first-class data objects. The query can directly expand from a station through `METRO_LINK`, `RAIL_LINK`, and `INTERCHANGE_TO` relationships. This makes multi-hop route search, cross-network interchange routing, and delay ripple analysis more natural to express than repeated SQL self-joins.
 
 This does not mean that graph queries are always faster in every situation. Rather, for this project’s routing-related use cases, the graph model is a better conceptual and practical fit because the main operations are path expansion, edge-weight accumulation, and neighbourhood traversal.
 
@@ -520,127 +525,158 @@ This is safer than relying on station names because names may be duplicated or c
 
 This shared identifier supports the project’s polyglot persistence design. Transactional data such as users, bookings, payments, and credentials remain in PostgreSQL, while route traversal and network topology queries are handled in Neo4j. The common `station_id` allows the two database systems to stay connected without duplicating all business data inside the graph.
 
+---
+
 ## Section 4 — Vector / RAG Design
 
 ### 1. Embedding and Cosine Similarity Rationale
 
-在我們的 TransitFlow 系統中，要進行向量化（Embedding）的資料，是 `policy_documents` 資料表中的政策文件內容，其來源包含 `refund_policy.json`（退票政策）、`ticket_types.json`（票價類型）、`booking_rules.json`（訂票規則）以及 `travel_policies.json`（乘車與行為規範）。這些文件會被轉成向量後存入 PostgreSQL 的 `policy_documents.embedding` 欄位，供客服檢索增強生成（RAG）系統查詢使用。
+In the TransitFlow system, the data to be embedded consists of the policy document content stored in the `policy_documents` table. The source files include `refund_policy.json` for refund policies, `ticket_types.json` for ticket type information, `booking_rules.json` for booking rules, and `travel_policies.json` for travel and conduct policies. These documents are converted into vectors and stored in the `policy_documents.embedding` column in PostgreSQL, where they support the customer service Retrieval-Augmented Generation (RAG) system.
 
-#### 為什麼做語意搜尋（Semantic Search）時，用餘弦相似度（Cosine Similarity）最適合？
-最核心的原因就是餘弦相似度具備**大小無關性（Magnitude-Independent）**，它在向量空間中算的是**方向相似度（Directional Similarity）**，而不會單純被原始向量的長度大小給主導。
+#### Why Cosine Similarity Is Suitable for Semantic Search
 
-餘弦相似度非常適合語意搜尋，因為它比較的是兩個 embedding vectors 在語意空間中的方向，而不是原始向量長度。在實際的客服情境中，使用者輸入的問題通常較為簡短（例如：「怎麼退票」），而資料庫中儲存的官方規章條文篇幅較長（例如詳細的退票手續費與時間窗口梯隊）。
+The key reason is that cosine similarity is **magnitude-independent**. It measures **directional similarity** in vector space instead of being dominated by the raw length or magnitude of the vectors.
 
-如果採用歐氏距離（Euclidean Distance），由於兩者文本長度差異導致的向量長度（Magnitude）差距，極易在距離計算上造成誤差。而餘弦相似度則能有效避開這點：即使使用者問題很短、政策文件較長，只要兩者語意主題接近（都在討論 refund rules），它們的向量方向在多維空間中仍會非常接近，因此系統能夠精準地將對應的官方政策檢索出來。
+Cosine similarity is suitable for semantic search because it compares the direction of two embedding vectors in semantic space rather than their original vector lengths. In a customer service scenario, user questions are usually short, such as “How can I get a refund?”, while official policy documents are often much longer, such as detailed refund fee rules and time-window tiers.
+
+If Euclidean distance were used, differences in text length and vector magnitude could affect the distance calculation. Cosine similarity reduces this issue: even if the user question is short and the policy document is long, as long as both discuss a similar semantic topic, such as refund rules, their vector directions will still be close in high-dimensional space. Therefore, the system can retrieve the corresponding official policy documents more accurately.
 
 ---
 
 ### 2. Full RAG Pipeline Workflow
 
-我們實作的檢索增強生成（RAG）功能，從使用者輸入問題到最後看到答案，底層完整的 Pipeline 跑了以下四個階段：
+The implemented Retrieval-Augmented Generation (RAG) function follows four main stages from the user’s question to the final answer:
 
-1. **Query Embedding**
-   使用者在客服介面送出問題後，後端程式會先呼叫嵌入模型（如 Ollama 的 `nomic-embed-text`），把這段問題文字轉換成一組固定長度的浮點數陣列（也就是問題向量）。
-2. **Similarity Search**
-   拿到問題向量後，系統會直接去 PostgreSQL 的 `policy_documents` 表下 SQL 查詢。我們在資料庫有針對 embedding 欄位建立 `USING hnsw (embedding vector_cosine_ops)` 索引，所以資料庫可以用餘弦相似度在裡面進行高速的比對。
-3. **Retrieved Documents**
-   資料庫會根據餘弦相似度算出來的分數，把最相關的幾筆官方政策原始文字（Context）撈出來，做為大模型回答時的依據。
-4. **LLM Prompt $\rightarrow$ Answer**
-   Python 後端會把「使用者的問題」跟剛才撈出來的「官方參考文件」包進我們寫好的 Prompt 模板裡，限制大模型一定要根據官方規定回答。最後把這個組裝好的 Prompt 丟給大語言模型（LLM），等模型生成出正確且口吻親切的客服答案後，再回傳給前端使用者。
+1. **Query Embedding**  
+   After the user submits a question in the customer service interface, the backend first calls an embedding model, such as Ollama’s `nomic-embed-text`, to convert the question text into a fixed-length array of floating-point numbers.
+
+2. **Similarity Search**  
+   After obtaining the query vector, the system searches the PostgreSQL `policy_documents` table. The database has an HNSW index on the embedding column using `vector_cosine_ops`, so PostgreSQL can perform efficient cosine similarity comparisons.
+
+3. **Retrieved Documents**  
+   Based on cosine similarity scores, the database returns the most relevant official policy documents as context for the language model.
+
+4. **LLM Prompt → Answer**  
+   The Python backend combines the user’s question with the retrieved official reference documents into a prompt template. The prompt instructs the language model to answer based only on the official policy context. The completed prompt is then sent to the LLM, and the generated customer-service response is returned to the frontend.
 
 ---
 
 ### 3. Embedding Dimension Choice and Provider Switch Impact
 
-#### 維度選擇
-看我們 `schema.sql` 裡的設定，當初建立向量欄位是寫 `embedding vector(768)`。這代表我們目前實作是用 **Ollama 的 `nomic-embed-text`**，產生的向量維度固定是 **768 維**。如果以後我們把模型廠商切換到 **Gemini** 的話，它預設產生的向量維度則會是 **3072 維**。
+#### Dimension Choice
 
-#### 如果在 Seed 完資料後強行「更換模型供應商」會怎樣？
-如果我們跑完 `seed_vectors.py` 把 768 維的 Ollama 向量塞進資料庫之後，沒重新 seed 就直接去 `.env` 把供應商改成 Gemini，系統會因為**維度不相容**而引發連鎖錯誤：
+According to the setting in `schema.sql`, the vector column is created as `embedding vector(768)`. This means the current implementation uses Ollama’s `nomic-embed-text`, which produces 768-dimensional embeddings. If the provider is switched to Gemini in the future, Gemini’s embedding model produces 3072-dimensional vectors.
 
-1. **維度不匹配（Dimension Mismatch）**：
-   當使用者進來問問題，系統因為設定改成了 Gemini，會用 Gemini 產出一個 **3072 維** 的問題向量。但這時候系統拿著 3072 維的向量去資料庫下 SQL 進行餘弦相似度比對時，PostgreSQL 當初設定的欄位維度只能接收 **768 維**。
-2. **索引失效與結構變更代價**：
-   因為長度根本對不起來，PostgreSQL 會直接報錯 `ERROR: vector columns must have the same dimensions`。原本建立在 768 維欄位上的 HNSW index 無法用來查 3072 維向量。若要完成模型切換，必須進資料庫把欄位改成 `vector(3072)`，清空或重建資料，重新運行 `seed_vectors.py` 塞入新模型的 embeddings，並重新建構 HNSW 索引。
-3. **實際運行的慘重後果（Practical Consequence）**：
-   對實際使用者來說，這會導致**整個客服檢索功能完全癱瘓**。只要有人發問，後端就會在查資料庫時直接噴 `500 Error`。系統不僅完全撈不到任何政策參考，LLM 也因為拿不到 Context 而沒辦法回答。前端使用者只會看到客服視窗一直轉圈圈或跳系統錯誤，智慧客服專案在維度調整與重新 Seed 完成前將無法提供服務。
+#### What Happens If the Provider Is Changed After Seeding
+
+If `seed_vectors.py` has already inserted 768-dimensional Ollama embeddings into the database, and the provider is changed to Gemini in `.env` without reseeding, the system will fail because the vector dimensions are incompatible.
+
+1. **Dimension Mismatch**  
+   When a user asks a question, the system will generate a 3072-dimensional query embedding through Gemini. PostgreSQL, however, has an embedding column defined as `vector(768)`, so the 3072-dimensional query vector cannot be compared against the stored 768-dimensional document vectors.
+
+2. **Index Incompatibility and Schema Change Cost**  
+   PostgreSQL will raise an error such as `ERROR: vector columns must have the same dimensions`. The HNSW index originally built on the 768-dimensional column cannot be used for 3072-dimensional vectors. To complete the provider switch, the database schema must be changed to `vector(3072)`, existing vector data must be cleared or regenerated, `seed_vectors.py` must be rerun using the new embedding provider, and the HNSW index must be rebuilt.
+
+3. **Practical Consequence**  
+   From the user’s perspective, this would cause the entire customer service retrieval function to fail. When a user asks a question, the backend would fail during database retrieval and may return a server error. The system would not be able to retrieve policy context, and the LLM would not have the required reference documents to answer correctly. Until the vector dimension is adjusted and the documents are reseeded, the smart customer service component would not function properly.
 
 ---
 
 ## Section 5 — AI Tool Usage Evidence
 
-This section documents the structured collaboration with AI tools during the graph database design, seeding development, verification scripting, and UI integration phases of the TransitFlow system. Below are three distinct examples illustrating how AI assistance was utilized, focusing on the specific responsibilities of this role.
+This section documents the structured collaboration with AI tools during the graph database design, seeding development, verification scripting, and UI integration phases of the TransitFlow system. Below are three distinct examples illustrating how AI assistance was utilised, focusing on the specific responsibilities of this role.
 
 ---
 
 ### Example 1: Graph Modeling and Label Partitioning Decision
+
 * **Context**: Designing the Neo4j graph database schema in `seed_neo4j.py` to support multi-modal transit routing. The challenge was deciding whether to represent all stations under a single generic label or partition them into distinct networks, which directly impacts how polymorphic station associations from the relational schema (`station_adjacencies`) are mapped.
+
 * **Prompt**:
   ```text
   We are seeding a Neo4j database from two JSON files containing station records: metro stations and national rail stations. Should we label all stations with a single (:Station) label, or separate labels like (:MetroStation) and (:NationalRailStation)? How should we model the connection edges between them to enable efficient routing search?
   ```
+
 * **Outcome**: The AI suggested using partitioned labels (`MetroStation` and `NationalRailStation`) to isolate the two transit systems in memory, avoiding scanning rail station nodes during metro-only traversals. For connectivity, it recommended establishing separate edge types (`METRO_LINK` and `RAIL_LINK`) and bridging them via bidirectional `INTERCHANGE_TO` edges at interchange hubs. This graph model was implemented in `seed_neo4j.py`.
 
 ---
 
-### Example 2: Edge Property Data Type Enforcement (AI Error & Correction)
+### Example 2: Edge Property Data Type Enforcement (AI Error and Correction)
+
 * **Context**: Resolving a Cypher runtime error where the pathfinding query failed to calculate total trip durations because travel times were imported as string variables rather than numbers.
+
 * **Prompt**:
   ```text
   In my Neo4j database, when I run a Cypher query using `reduce(t = 0, r IN relationships(path) | t + r.travel_time_min)`, it fails with a type mismatch error because some relationships store `travel_time_min` as strings. Show me how to fix my Python seeder script where I retrieve properties from the parsed JSON data.
   ```
-* **Outcome (Incorrect AI Suggestion)**: The AI suggested modifying the Cypher query to perform dynamic type casting during traversal, e.g., `toInteger(r.travel_time_min)`.
-* **Why it was incorrect**: Executing `toInteger()` dynamically inside the Cypher traversal engine introduces substantial runtime CPU overhead for every edge visited. In a production routing system with deep paths, this degrades performance. The correct place to solve this is during the data ingest phase.
-* **Correction**: The suggestion was rejected. Instead, the seeder script `seed_neo4j.py` was corrected by explicitly casting the JSON values using `int(adj["travel_time_min"])` when parameterizing the `session.run` parameters. This ensures that only pure integer types are stored on edges, allowing the Neo4j engine to execute the `reduce` summation natively at maximum speed.
+
+* **Outcome (Incorrect AI Suggestion)**: The AI suggested modifying the Cypher query to perform dynamic type casting during traversal, for example by using `toInteger(r.travel_time_min)`.
+
+* **Why It Was Incorrect**: Executing `toInteger()` dynamically inside the Cypher traversal engine introduces runtime CPU overhead for every edge visited. In a production routing system with deep paths, this would degrade performance. The correct place to solve the issue is during the data ingestion phase.
+
+* **Correction**: The suggestion was rejected. Instead, the seeder script `seed_neo4j.py` was corrected by explicitly casting the JSON values using `int(adj["travel_time_min"])` when parameterising the `session.run` parameters. This ensures that only pure integer values are stored on edges, allowing the Neo4j engine to execute the `reduce` summation natively.
 
 ---
 
 ### Example 3: Automated Parity Check Scripting for Graph Integrity
-* **Context**: Creating an automated verification script (`skeleton/verify_neo4j.py`) to guarantee that the seeded graph nodes and relationships match the source JSON mock files perfectly.
+
+* **Context**: Creating an automated verification script (`skeleton/verify_neo4j.py`) to guarantee that the seeded graph nodes and relationships match the source JSON mock files.
+
 * **Prompt**:
   ```text
   Write a Python script that connects to Neo4j and validates that the number of MetroStation and NationalRailStation nodes matches the count of items in metro_stations.json and national_rail_stations.json, and counts the relationship edges to make sure they correspond to the number of adjacencies.
   ```
+
 * **Outcome**: The AI generated a script template using the Neo4j Python driver. It loads the JSON payloads into memory, queries node labels, computes expected edge counts mathematically, and compares them against the database. This was refined into the final `verify_neo4j.py` tool to quickly audit database parity.
 
 ---
 
 ## Section 6 — Reflection & Trade-offs
 
-This section reflects on the key design decisions made during the development of the database infrastructure (including both Relational and Graph layers) and the UI integration layers, detailing the engineering rationales behind them and discussing production considerations.
+This section reflects on the key design decisions made during the development of the database infrastructure, including both the relational and graph layers, as well as the UI integration layer. It explains the engineering rationale behind these decisions and discusses production considerations.
 
 ---
 
 ### 1. Selected Design Decisions and Rationales
 
-#### Decision A: Dual Primary Key (PK) Selection Strategy — Balancing Security and Write Performance
-* **Design Choice**: Rather than uniformly applying a single data type for all Primary Keys across the entire database system, we implemented a dual PK strategy based on the data's inherent nature. Core business tables (`users`, `bookings`, `payments`) utilize `VARCHAR(32)` to store non-sequential UUIDs/HashIDs, whereas telemetry log tables (`metro_access_logs`) utilize a fast auto-incrementing `BIGINT GENERATED ALWAYS AS IDENTITY` (Serial).
+#### Decision A: Dual Primary Key Selection Strategy — Balancing Security and Write Performance
+
+* **Design Choice**: Rather than applying a single primary key data type across the entire database system, the project uses a dual primary key strategy based on the nature of the data. Core business tables such as `users`, `bookings`, and `payments` use `VARCHAR(32)` to store non-sequential UUIDs or hash IDs, whereas the telemetry log table `metro_access_logs` uses a fast auto-incrementing `BIGINT GENERATED ALWAYS AS IDENTITY`.
+
 * **Rationale**:
-  1. **Security & Privacy Orientation (`VARCHAR(32)` for UUIDs)**: For user profiles and financial booking records, utilizing standard serial integers exposes the system to **Insecure Direct Object Reference (IDOR)** vulnerability, where attackers can easily guess adjacent record IDs by simply incrementing URLs. Storing UUIDs as `VARCHAR(32)` guarantees unguessable, non-sequential references, providing security isolation and seamless support for distributed environments.
-  2. **Performance & Throughput Orientation (`BIGINT IDENTITY`)**: For the turnstile gate logs (`metro_access_logs`), data ingestion is highly concurrent and append-only. Storing random `VARCHAR` keys here would severely bottleneck the database due to constant **B-Tree index page splits** and memory fragmentation during random inserts. Adhering to strict performance-driven database concepts, we explicitly avoided `VARCHAR` for logs and leveraged `BIGINT IDENTITY` to preserve native, chronological sorting and maximized insert speed.
+  1. **Security and Privacy Orientation (`VARCHAR(32)` for UUIDs)**: For user profiles and financial booking records, using standard serial integers could expose the system to Insecure Direct Object Reference (IDOR) risks, because attackers might guess adjacent record IDs by incrementing URL parameters. Storing UUID-style values as `VARCHAR(32)` provides non-sequential and difficult-to-guess references, improving security isolation and supporting distributed environments.
+  2. **Performance and Throughput Orientation (`BIGINT IDENTITY`)**: For turnstile gate logs such as `metro_access_logs`, data ingestion is highly concurrent and append-only. Random `VARCHAR` keys would increase B-tree index page splits and memory fragmentation during random inserts. Using `BIGINT IDENTITY` preserves chronological ordering and improves insert performance for log-style data.
 
 #### Decision B: Partitioning Node Labels by Transit Network (`:MetroStation` vs `:NationalRailStation`)
-* **Design Choice**: Rather than using a generic label like `:Station` for every node in the graph, stations are explicitly partitioned into two distinct labels: `:MetroStation` and `:NationalRailStation`.
+
+* **Design Choice**: Rather than using a generic label such as `:Station` for every node in the graph, stations are explicitly partitioned into two distinct labels: `:MetroStation` and `:NationalRailStation`.
+
 * **Rationale**:
-  1. **Query Optimization**: The separate labels make it possible to write network-specific Cypher queries, such as matching only :MetroStation nodes for metro-only analysis. Even when a multi-modal query uses both labels, label partitioning keeps the graph model semantically clear and avoids relying on a single overloaded :Station label with many conditional properties.
-  2. **Properties Separation & Polymorphic Resolution**: Metro stations contain specific interchange fields (such as `interchange_metro_lines`) that do not apply to rail stations. Explicit label partitioning keeps the graph schema clean and well-typed, allowing the polymorphic association defined in the relational table `station_adjacencies` to be cleanly resolved within the graph traversal space.
+  1. **Query Optimisation**: Separate labels make it possible to write network-specific Cypher queries, such as matching only `:MetroStation` nodes for metro-only analysis. Even when a multi-modal query uses both labels, label partitioning keeps the graph model semantically clear and avoids relying on a single overloaded `:Station` label with many conditional properties.
+  2. **Property Separation and Polymorphic Resolution**: Metro stations contain specific interchange fields, such as `interchange_metro_lines`, that do not apply to rail stations. Explicit label partitioning keeps the graph schema cleaner and better typed, allowing the polymorphic association defined in the relational table `station_adjacencies` to be represented clearly within the graph traversal space.
 
 #### Decision C: Pre-calculated Interchange Edges (`:INTERCHANGE_TO`)
-* **Design Choice**: Instead of dynamically calculating whether a metro station and a rail station share a physical interchange during routing queries, these links are explicitly modeled as bidirectional `:INTERCHANGE_TO` relationships during the seeding phase.
+
+* **Design Choice**: Instead of dynamically calculating whether a metro station and a rail station share a physical interchange during routing queries, these links are explicitly modelled as bidirectional `:INTERCHANGE_TO` relationships during the seeding phase.
+
 * **Rationale**:
-  1. **Latency Reduction**: Calculating geographic proximities or matching station names on the fly during a path traversal query adds runtime computational cost. Pre-seeding the interchange relationships trades a tiny amount of database disk space for sub-millisecond route-finding queries.
-  2. **Encapsulating Transfer Logic**: In the current project, INTERCHANGE_TO is modeled as a zero-time transfer edge, matching the project assumption that interchange time is not included in route estimates. In a future extension, transfer penalties could be added as relationship properties if the routing model needs to account for walking time.
+  1. **Latency Reduction**: Calculating geographic proximity or matching station names during a path traversal query would add runtime computation cost. Pre-seeding interchange relationships trades a small amount of database storage for faster route-finding queries.
+  2. **Encapsulating Transfer Logic**: In the current project, `INTERCHANGE_TO` is modelled as a zero-time transfer edge, matching the project assumption that interchange time is not included in route estimates. In a future extension, transfer penalties could be added as relationship properties if the routing model needs to account for walking time.
 
 ---
 
 ### 2. Production System Considerations
 
-To scale the graph database and UI for a production environment serving large-scale daily commuters, the following changes would be necessary:
+To scale the graph database and UI for a production environment serving large numbers of daily commuters, the following changes would be necessary.
 
 #### Causal Clustering for Neo4j Scaling
-* **Current Implementation**: The system runs on a single, isolated Neo4j instance in a Docker container.
-* **Production Requirement**: Transit routing queries are highly read-intensive. A single instance would quickly bottleneck under concurrent requests. A production deployment would implement a **Neo4j Causal Cluster** with one primary writer instance and multiple read replicas. This offloads routing and pathfinding calculations to read-only instances, ensuring horizontal scalability.
+
+* **Current Implementation**: The system runs on a single isolated Neo4j instance in a Docker container.
+
+* **Production Requirement**: Transit routing queries are read-intensive. A single instance could become a bottleneck under many concurrent requests. A production deployment would use a Neo4j causal cluster with one primary writer instance and multiple read replicas. This would offload routing and pathfinding calculations to read-only instances and support horizontal scalability.
 
 #### Graph Data Syncing and Event-Driven Seeding
-* **Current Implementation**: The seeder script clears the entire graph and recreates all nodes and edges from scratch from static JSON mock files.
-* **Production Requirement**: In a live system, station statuses (closures, delays) and schedules change dynamically. The seeder must be replaced with an **event-driven syncing pipeline** (e.g., listening to database triggers or a Kafka message queue). This allows the graph to receive incremental updates (updating relationship weights or station availability) in real time without downtime.
+
+* **Current Implementation**: The seeder script clears the entire graph and recreates all nodes and edges from static JSON mock files.
+
+* **Production Requirement**: In a live system, station statuses, closures, delays, and schedules may change dynamically. The seeder should be replaced with an event-driven syncing pipeline, such as database triggers or a Kafka message queue. This would allow the graph to receive incremental updates, such as updated relationship weights or station availability, in real time without downtime.
