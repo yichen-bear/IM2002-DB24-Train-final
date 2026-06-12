@@ -74,7 +74,7 @@ def query_shortest_route(
             "origin_id": origin_id,
             "destination_id": destination_id,
             "total_time_min": total_time,
-            "stations": stations,
+            "path": stations,
             "legs": legs
         }
 
@@ -144,7 +144,7 @@ def query_cheapest_route(
             "fare_class": fare_class,
             "total_fare_usd": round(total_fare, 2),
             "transfer_count": transfers,
-            "stations": stations,
+            "path": stations,
             "legs": legs
         }
 
@@ -156,10 +156,11 @@ def query_alternative_routes(
     destination_id: str,
     avoid_station_id: str,
     network: str = "auto",
-) -> dict:
+    max_routes: int = 1
+) -> list[dict]:
     """
-    Find an alternative route that completely circumvents a closed or delayed station.
-    Guarantees structural return consistency (always a dict) to avoid application failure.
+    Find alternative routes that completely circumvent a closed or delayed station.
+    Returns a list of dicts.
     """
     cypher_query = """
     MATCH (start {station_id: $origin_id})
@@ -170,7 +171,7 @@ def query_alternative_routes(
          reduce(t = 0, r IN relationships(path) | t + coalesce(r.travel_time_min, 0)) AS total_time
     RETURN path, total_time
     ORDER BY total_time ASC
-    LIMIT 1
+    LIMIT $max_routes
     """
     
     with _DRIVER.session() as session:
@@ -178,34 +179,27 @@ def query_alternative_routes(
             cypher_query, 
             origin_id=origin_id, 
             destination_id=destination_id, 
-            avoid_station_id=avoid_station_id
+            avoid_station_id=avoid_station_id,
+            max_routes=max_routes
         )
-        record = result.single()
         
-        if not record:
-            # FIXED: Return consistent dict structure instead of a nested array list
-            return {
-                "found": False,
+        routes = []
+        for record in result:
+            path_obj = record["path"]
+            stations = [{"station_id": n.get("station_id"), "name": n.get("name")} for n in path_obj.nodes]
+            legs = [{"type": r.type, "line": r.get("line", "Interchange"), "travel_time_min": r.get("travel_time_min", 2)} for r in path_obj.relationships]
+
+            routes.append({
+                "found": True,
                 "origin_id": origin_id,
                 "destination_id": destination_id,
                 "avoid_station_id": avoid_station_id,
-                "message": f"No viable alternative path exists detour bypassing {avoid_station_id}."
-            }
-        
-        path = record["path"]
-        
-        stations = [{"station_id": n.get("station_id"), "name": n.get("name")} for n in path.nodes]
-        legs = [{"type": r.type, "line": r.get("line", "Interchange"), "travel_time_min": r.get("travel_time_min", 2)} for r in path.relationships]
-
-        return {
-            "found": True,
-            "origin_id": origin_id,
-            "destination_id": destination_id,
-            "avoid_station_id": avoid_station_id,
-            "total_time_min": record["total_time"],
-            "stations": stations,
-            "legs": legs
-        }
+                "total_time_min": record["total_time"],
+                "path": stations,
+                "legs": legs
+            })
+            
+        return routes
 
 
 # ── 4. CROSS-NETWORK INTERCHANGE PATH ────────────────────────────────────────
@@ -262,7 +256,7 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
             "destination_id": destination_id,
             "total_time_min": record["total_time"],
             "interchange_points": interchange_points,
-            "stations": stations,
+            "path": stations,
             "legs": legs
         }
 
@@ -275,8 +269,8 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     """
     cypher_query = """
     MATCH (disrupted {station_id: $delayed_station_id})
-    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..$hops]-(affected)
-    WHERE disrupted <> affected
+    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*0..15]-(affected)
+    WHERE length(path) <= $hops
     RETURN DISTINCT affected.station_id AS station_id,
                     affected.name AS name,
                     length(path) AS hops_away,
