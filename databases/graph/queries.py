@@ -37,7 +37,7 @@ def query_shortest_route(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]-(end)
+    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WITH path, 
          reduce(t = 0, r IN relationships(path) | t + coalesce(r.travel_time_min, 0)) AS total_time
     RETURN path, total_time
@@ -95,7 +95,7 @@ def query_cheapest_route(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]-(end)
+    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WITH path,
          reduce(cost = 0.0, r IN relationships(path) | 
             cost + case 
@@ -165,7 +165,7 @@ def query_alternative_routes(
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]-(end)
+    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WHERE NONE(node IN nodes(path) WHERE node.station_id = $avoid_station_id)
     WITH path,
          reduce(t = 0, r IN relationships(path) | t + coalesce(r.travel_time_min, 0)) AS total_time
@@ -212,7 +212,7 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
     cypher_query = """
     MATCH (start {station_id: $origin_id})
     MATCH (end {station_id: $destination_id})
-    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]-(end)
+    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WHERE ANY(rel IN relationships(path) WHERE type(rel) = 'INTERCHANGE_TO')
     WITH path,
          reduce(t = 0, r IN relationships(path) | t + coalesce(r.travel_time_min, 0)) AS total_time
@@ -269,7 +269,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     """
     cypher_query = """
     MATCH (disrupted {station_id: $delayed_station_id})
-    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*0..15]-(affected)
+    MATCH path = (disrupted)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*0..15]->(affected)
     WHERE length(path) <= $hops
     RETURN DISTINCT affected.station_id AS station_id,
                     affected.name AS name,
