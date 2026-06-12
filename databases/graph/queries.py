@@ -33,7 +33,7 @@ def query_shortest_route(
 ) -> dict:
     """
     Find the fastest multi-modal route based on total travel time.
-    Calculates moving times and physical interchange transfer penalties.
+    Calculates moving times; interchange edges are treated as zero-time transfers.
     """
     cypher_query = """
     MATCH (start {station_id: $origin_id})
@@ -68,7 +68,7 @@ def query_shortest_route(
                 legs.append({
                     "type": r.type,
                     "line": r.get("line", "Interchange / Walkway"),
-                    "travel_time_min": r.get("travel_time_min", 2) # Fallback to 2-min walking transfer penalty
+                    "travel_time_min": r.get("travel_time_min", 0)
                 })
 
             return {
@@ -291,7 +291,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     
     with _driver() as driver:
         with driver.session() as session:
-            result = session.run(cypher_query, delayed_station_id=delayed_station_id)
+            result = session.run(cypher_query, delayed_station_id=delayed_station_id, hops=hops)
             
             ripple_effects = []
             seen_stations = set()
