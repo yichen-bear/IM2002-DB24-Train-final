@@ -155,8 +155,24 @@ def query_national_rail_availability(
                     if op_row and day_name not in op_row["operates_on"]:
                         continue # Skip if train does not run on this day of the week
 
-                # Query the number of booked seats for a specific date
+                # Query the number of total and booked seats for a specific date
                 occupied_seats = 0
+                total_seats = 0
+                
+                # Fetch total seats for this schedule
+                cur.execute(
+                    """
+                    SELECT COUNT(rs.seat_real_id) 
+                    FROM rail_seats rs
+                    JOIN rail_coaches rc ON rs.coach_id = rc.coach_id
+                    WHERE rc.schedule_id = %s;
+                    """,
+                    (sch["schedule_id"],)
+                )
+                total_seats_row = cur.fetchone()
+                if total_seats_row:
+                    total_seats = total_seats_row["count"]
+
                 if travel_date:
                     cur.execute(
                         """
@@ -167,7 +183,8 @@ def query_national_rail_availability(
                     )
                     occupied_seats = cur.fetchone()["count"]
                 
-                sch_dict["occupied_seats"] = occupied_seats
+                sch_dict["available_seats"] = total_seats - occupied_seats
+                # Remove occupied_seats to avoid confusion, though it could be kept
                 
                 # Format time types into clear serializable strings safely
                 if isinstance(sch_dict.get("departure_time"), (time, datetime)):
@@ -435,7 +452,20 @@ def query_user_profile(user_email: str) -> Optional[dict]:
             # 1. Query the user profile directly from the users table via email
             cur.execute("SELECT * FROM users WHERE email = %s;", (user_email,))
             row = cur.fetchone()
-            return dict(row) if row else None
+            if row:
+                user_dict = dict(row)
+                # Map full_name to name as required
+                user_dict["name"] = user_dict.get("full_name")
+                
+                # Extract year from date_of_birth
+                dob = user_dict.get("date_of_birth")
+                if dob:
+                    user_dict["year_of_birth"] = dob.year
+                else:
+                    user_dict["year_of_birth"] = None
+                    
+                return user_dict
+            return None
 
 
 def query_user_bookings(user_email: str) -> dict:
