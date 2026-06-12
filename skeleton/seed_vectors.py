@@ -86,7 +86,7 @@ def build_documents():
 
 def seed():
     documents = build_documents()
-    print(f"📄 Embedding {len(documents)} policy documents using {llm.chat_provider}...\n")
+    print(f"[Doc] Embedding {len(documents)} policy documents using {llm.chat_provider}...\n")
 
     for i, doc in enumerate(documents):
         print(f"  [{i+1}/{len(documents)}] Embedding: {doc['title']}")
