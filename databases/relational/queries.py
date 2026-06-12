@@ -697,6 +697,8 @@ def execute_booking(
             
             return True, {
                 "booking_id": booking_id,
+                "user_id": user_id,
+                "schedule_id": schedule_id,
                 "payment_id": payment_id,
                 "seat_id": selected_short_id,
                 "amount_usd": amount_usd,
@@ -768,7 +770,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             conn.commit()
             return True, {
                 "booking_id": booking_id,
-                "refund_amount_usd": refund_amount,
+                "refund_amount": refund_amount,
                 "policy_note": policy_note,
                 "status": "cancelled"
             }
@@ -973,6 +975,7 @@ def query_policy_vector_search(embedding: list[float], top_k: int = VECTOR_TOP_K
     """
     sql = """
         SELECT
+            id AS policy_id,
             title,
             category,
             content,
